@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Indoor Activity Location Recorder</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Indoor Activity Location Recorder</h1>
+    <p>Click locations on the embedded indoor map and save activity records.</p>
+  </header>
+
+  <main class="layout">
+    <section class="map-panel">
+      <div class="panel-head">
+        <div class="map-controls">
+          <label for="floorSelect">Floor</label>
+          <select id="floorSelect" aria-label="Select floor">
+            <option value="floor-1">Floor 1</option>
+            <option value="floor-2">Floor 2</option>
+            <option value="floor-3">Floor 3</option>
+          </select>
+        </div>
+        <button id="clearMarkersBtn" type="button">Clear Markers</button>
+      </div>
+
+      <div class="map-wrap" id="mapWrap">
+        <img
+          id="mapImage"
+          alt="Indoor map"
+          src="assets/floor-1.svg"
+        >
+      </div>
+      <p class="hint">Click on the map to pick a location before saving an activity.</p>
+    </section>
+
+    <section class="form-panel">
+      <h2>Record Activity</h2>
+      <form id="activityForm">
+        <label>
+          Activity Type
+          <select id="activityType" required>
+            <option value="">Select activity</option>
+            <option>Walking</option>
+            <option>Sitting</option>
+            <option>Standing</option>
+            <option>Meeting</option>
+            <option>Queueing</option>
+            <option>Other</option>
+          </select>
+        </label>
+
+        <label>
+          Person / Group ID
+          <input id="actorId" type="text" placeholder="e.g. P-12 or Group-A">
+        </label>
+
+        <label>
+          Date & Time
+          <input id="activityTime" type="datetime-local" required>
+        </label>
+
+        <label>
+          Notes
+          <textarea id="notes" rows="3" placeholder="Optional details"></textarea>
+        </label>
+
+        <div class="coords">
+          <strong>Selected Point:</strong>
+          <span id="selectedCoords">None</span>
+        </div>
+
+        <div class="actions">
+          <button type="submit">Save Record</button>
+          <button id="resetFormBtn" type="button" class="secondary">Reset</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <section class="records-panel">
+    <div class="records-head">
+      <h2>Recorded Activities</h2>
+      <div class="records-actions">
+        <input id="searchInput" type="text" placeholder="Search activity, ID, notes...">
+        <button id="exportBtn" type="button">Export JSON</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Activity</th>
+            <th>ID</th>
+            <th>Floor</th>
+            <th>Location (%)</th>
+            <th>Notes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="recordsTbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
