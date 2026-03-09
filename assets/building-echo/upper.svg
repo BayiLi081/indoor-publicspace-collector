@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
+  <rect width="1200" height="800" fill="#edfff8"/>
+  <rect x="70" y="90" width="310" height="210" rx="14" fill="#c9ebdd" stroke="#7b8ba1"/>
+  <rect x="410" y="90" width="360" height="210" rx="14" fill="#bfe4d4" stroke="#7b8ba1"/>
+  <rect x="800" y="90" width="330" height="210" rx="14" fill="#d3f1e5" stroke="#7b8ba1"/>
+  <rect x="70" y="335" width="500" height="190" rx="14" fill="#e9edf5" stroke="#8ea0bd"/>
+  <rect x="600" y="335" width="530" height="190" rx="14" fill="#e7efe8" stroke="#8dab90"/>
+  <rect x="70" y="560" width="1060" height="160" rx="14" fill="#f6ece1" stroke="#b49a7f"/>
+
+  <text x="600" y="46" text-anchor="middle" fill="#2f425d" font-size="32" font-family="Arial, sans-serif">Building Echo</text>
+  <text x="600" y="80" text-anchor="middle" fill="#3c5679" font-size="24" font-family="Arial, sans-serif">Upper</text>
+
+  <text x="225" y="205" text-anchor="middle" fill="#25364f" font-size="20" font-family="Arial, sans-serif">Zone A</text>
+  <text x="590" y="205" text-anchor="middle" fill="#25364f" font-size="20" font-family="Arial, sans-serif">Zone B</text>
+  <text x="965" y="205" text-anchor="middle" fill="#25364f" font-size="20" font-family="Arial, sans-serif">Zone C</text>
+  <text x="320" y="445" text-anchor="middle" fill="#2f425d" font-size="20" font-family="Arial, sans-serif">Common Area</text>
+  <text x="865" y="445" text-anchor="middle" fill="#2f425d" font-size="20" font-family="Arial, sans-serif">Office Area</text>
+  <text x="600" y="655" text-anchor="middle" fill="#5b4632" font-size="20" font-family="Arial, sans-serif">Corridor</text>
+</svg>

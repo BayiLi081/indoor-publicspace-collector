@@ -9,19 +9,18 @@
 <body>
   <header class="topbar">
     <h1>Indoor Activity Location Recorder</h1>
-    <p>Click locations on the embedded indoor map and save activity records.</p>
+    <p>Pick a map point and/or attach a camera image with GPS metadata before saving.</p>
   </header>
 
   <main class="layout">
     <section class="map-panel">
       <div class="panel-head">
         <div class="map-controls">
+          <label for="buildingSelect">Building</label>
+          <select id="buildingSelect" aria-label="Select building"></select>
+
           <label for="floorSelect">Floor</label>
-          <select id="floorSelect" aria-label="Select floor">
-            <option value="floor-1">Floor 1</option>
-            <option value="floor-2">Floor 2</option>
-            <option value="floor-3">Floor 3</option>
-          </select>
+          <select id="floorSelect" aria-label="Select floor"></select>
         </div>
         <button id="clearMarkersBtn" type="button">Clear Markers</button>
       </div>
@@ -30,10 +29,9 @@
         <img
           id="mapImage"
           alt="Indoor map"
-          src="assets/floor-1.svg"
         >
       </div>
-      <p class="hint">Click on the map to pick a location before saving an activity.</p>
+      <p class="hint">Select building and floor, then click the map to pick an indoor point. You can also attach a GPS-tagged photo.</p>
     </section>
 
     <section class="form-panel">
@@ -60,6 +58,12 @@
         <label>
           Date & Time
           <input id="activityTime" type="datetime-local" required>
+        </label>
+
+        <label>
+          Capture / Upload Image
+          <input id="photoInput" type="file" accept="image/*" capture="environment">
+          <small id="photoLocationStatus" class="photo-status" data-state="muted">No image selected.</small>
         </label>
 
         <label>
@@ -95,8 +99,10 @@
             <th>Time</th>
             <th>Activity</th>
             <th>ID</th>
+            <th>Building</th>
             <th>Floor</th>
             <th>Location (%)</th>
+            <th>Photo GPS</th>
             <th>Notes</th>
             <th></th>
           </tr>
@@ -106,6 +112,6 @@
     </div>
   </section>
 
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
