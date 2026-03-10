@@ -102,3 +102,13 @@ python3 manage.py migrate
 ```
 
 - After migration, restart the Django server (`python3 manage.py runserver`).
+
+- If saving a record fails with `403 Forbidden` after Azure App Service deployment, configure App Settings:
+
+```text
+DJANGO_DEBUG=False
+DJANGO_ALLOWED_HOSTS=<your-app>.azurewebsites.net,<your-custom-domain>
+DJANGO_CSRF_TRUSTED_ORIGINS=https://<your-app>.azurewebsites.net,https://<your-custom-domain>
+```
+
+- Restart the App Service after updating settings.

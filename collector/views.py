@@ -13,6 +13,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
 from .models import ActivityRecord
@@ -21,6 +22,7 @@ ROOT_BUILDING_ID = "__root__"
 MAP_EXTENSIONS = {".svg", ".png", ".jpg", ".jpeg", ".webp"}
 
 
+@ensure_csrf_cookie
 def index(request: HttpRequest) -> HttpResponse:
   return render(request, "collector/index.html")
 

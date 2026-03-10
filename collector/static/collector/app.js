@@ -761,11 +761,12 @@ function getCsrfToken() {
     .map((chunk) => chunk.trim())
     .find((chunk) => chunk.startsWith("csrftoken="));
 
-  if (!tokenPair) {
-    return "";
+  if (tokenPair) {
+    return decodeURIComponent(tokenPair.slice("csrftoken=".length));
   }
 
-  return decodeURIComponent(tokenPair.slice("csrftoken=".length));
+  const formToken = document.querySelector("input[name='csrfmiddlewaretoken']")?.value;
+  return formToken || "";
 }
 
 async function parseApiError(response) {

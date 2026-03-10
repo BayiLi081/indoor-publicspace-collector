@@ -1,10 +1,28 @@
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = "change-me-in-production"
-DEBUG = True
-ALLOWED_HOSTS = ["*"]
+
+def env_bool(name: str, default: bool) -> bool:
+  value = os.getenv(name)
+  if value is None:
+    return default
+  return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_list(name: str, default: str) -> list[str]:
+  raw = os.getenv(name, default)
+  return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-me-in-production")
+DEBUG = env_bool("DJANGO_DEBUG", True)
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,.azurewebsites.net")
+CSRF_TRUSTED_ORIGINS = env_list(
+  "DJANGO_CSRF_TRUSTED_ORIGINS",
+  "http://localhost,http://127.0.0.1,https://*.azurewebsites.net",
+)
 
 INSTALLED_APPS = [
   "django.contrib.admin",
@@ -65,5 +83,11 @@ STATICFILES_DIRS = [BASE_DIR / "collector" / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 ASSETS_DIR = BASE_DIR / "assets"
+
+# Azure App Service terminates TLS at the front door and forwards protocol via header.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+SESSION_COOKIE_SECURE = env_bool("DJANGO_SESSION_COOKIE_SECURE", not DEBUG)
+CSRF_COOKIE_SECURE = env_bool("DJANGO_CSRF_COOKIE_SECURE", not DEBUG)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
