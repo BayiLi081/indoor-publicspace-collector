@@ -51,6 +51,7 @@ pip install -r requirements.txt
 
 1. Apply migrations:
 
+
 ```bash
 python3 manage.py migrate
 ```
