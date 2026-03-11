@@ -76,6 +76,49 @@ body {
   min-width: 150px;
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.collect-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.zoom-btn {
+  min-width: 2.2rem;
+  padding: 0.45rem 0.55rem;
+}
+
+.zoom-value {
+  min-width: 3.2rem;
+  text-align: center;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+button.collect-toggle.active,
+button.collect-toggle[aria-pressed="true"] {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+button.collect-toggle.active:hover,
+button.collect-toggle[aria-pressed="true"]:hover {
+  background: #8e1f17;
+  border-color: #8e1f17;
+}
+
 .map-wrap {
   position: relative;
   min-height: 380px;
@@ -83,11 +126,33 @@ body {
   background: #f5f7fa;
 }
 
-.map-wrap img {
+.map-canvas {
+  position: relative;
+  width: 100%;
+  min-width: 100%;
+}
+
+.map-canvas img {
   display: block;
   width: 100%;
   height: auto;
   user-select: none;
+}
+
+.cluster-link {
+  position: absolute;
+  height: 3px;
+  background: rgba(20, 98, 204, 0.68);
+  border-radius: 999px;
+  transform-origin: left center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.cluster-link.preview {
+  background: rgba(180, 35, 24, 0.8);
+  border: 1px dashed rgba(255, 255, 255, 0.85);
+  height: 4px;
 }
 
 .marker {
@@ -100,11 +165,13 @@ body {
   box-shadow: 0 0 0 1px #e33131;
   transform: translate(-50%, -50%);
   pointer-events: none;
+  z-index: 3;
 }
 
 .marker.selected {
   background: #0f4ea5;
   box-shadow: 0 0 0 1px #0f4ea5;
+  z-index: 4;
 }
 
 .hint {
@@ -112,6 +179,21 @@ body {
   padding: 0.7rem 0.9rem 0.9rem;
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.collect-status {
+  margin: 0;
+  padding: 0.7rem 0.9rem 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.collect-status[data-state="active"] {
+  color: #0b6f32;
+}
+
+.collect-status[data-state="warn"] {
+  color: #9a5f05;
 }
 
 .form-panel {
@@ -129,10 +211,15 @@ form {
   gap: 0.75rem;
 }
 
-label {
+label,
+.input-group {
   display: grid;
   gap: 0.3rem;
   font-size: 0.92rem;
+}
+
+label {
+  margin: 0;
 }
 
 input,
@@ -177,9 +264,54 @@ textarea {
   color: var(--danger);
 }
 
+.save-prompt {
+  margin: 0;
+  min-height: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.save-prompt[data-state="success"] {
+  color: #0b6f32;
+}
+
+.save-prompt[data-state="error"] {
+  color: var(--danger);
+}
+
 .actions {
   display: flex;
   gap: 0.6rem;
+}
+
+.gender-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.gender-btn {
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 0.42rem 0.75rem;
+}
+
+.gender-btn:hover {
+  background: #f3f7ff;
+  border-color: #b8cae8;
+  color: var(--text);
+}
+
+.gender-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.gender-btn.active:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: #fff;
 }
 
 button {
@@ -193,6 +325,20 @@ button {
 
 button:hover {
   background: var(--accent-strong);
+}
+
+button.gender-btn.active,
+button.gender-btn[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+button.gender-btn.active:hover,
+button.gender-btn[aria-pressed="true"]:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: #fff;
 }
 
 button.secondary {
@@ -242,6 +388,16 @@ th {
   color: var(--muted);
 }
 
+.record-photo-preview {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #eef3fb;
+  display: block;
+}
+
 .danger {
   background: #fff;
   color: var(--danger);
@@ -251,6 +407,17 @@ th {
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;
+  }
+
+  .panel-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+
+  .panel-actions {
+    justify-content: space-between;
+    flex-wrap: wrap;
   }
 
   .records-head {

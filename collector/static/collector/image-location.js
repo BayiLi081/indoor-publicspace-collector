@@ -1,4 +1,5 @@
 const EXIFR_MODULE_URL = "https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/lite.esm.js";
+const DEFAULT_GEOLOCATION_TIMEOUT_MS = 12000;
 let gpsReaderPromise = null;
 
 function round6(value) {
@@ -43,4 +44,68 @@ export async function extractPhotoLocationFromImage(file) {
   }
 
   return location;
+}
+
+function hasGeolocationSupport() {
+  return (
+    typeof navigator !== "undefined" &&
+    !!navigator.geolocation &&
+    typeof navigator.geolocation.getCurrentPosition === "function"
+  );
+}
+
+function geolocationErrorMessage(error) {
+  if (!error || typeof error.code !== "number") {
+    return "Could not get current device location.";
+  }
+
+  if (error.code === 1) {
+    return "Location permission was denied.";
+  }
+  if (error.code === 2) {
+    return "Current location is unavailable.";
+  }
+  if (error.code === 3) {
+    return "Location request timed out.";
+  }
+
+  return "Could not get current device location.";
+}
+
+export async function requestCurrentDeviceLocation({
+  timeoutMs = DEFAULT_GEOLOCATION_TIMEOUT_MS,
+  maximumAgeMs = 0,
+  enableHighAccuracy = true,
+} = {}) {
+  if (!hasGeolocationSupport()) {
+    throw new Error("Browser geolocation is unavailable.");
+  }
+
+  if (typeof window !== "undefined" && !window.isSecureContext) {
+    throw new Error("Device location fallback requires HTTPS (or localhost).");
+  }
+
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { coords } = position;
+        const location = {
+          latitude: round6(coords.latitude),
+          longitude: round6(coords.longitude),
+        };
+
+        if (Number.isFinite(coords.altitude)) {
+          location.altitude = round2(coords.altitude);
+        }
+
+        resolve(location);
+      },
+      (error) => reject(new Error(geolocationErrorMessage(error))),
+      {
+        enableHighAccuracy,
+        timeout: timeoutMs,
+        maximumAge: maximumAgeMs,
+      }
+    );
+  });
 }

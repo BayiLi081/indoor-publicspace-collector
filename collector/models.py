@@ -11,6 +11,8 @@ class ActivityRecord(models.Model):
   floor_id = models.CharField(max_length=128, db_index=True)
   activity_type = models.CharField(max_length=64)
   actor_id = models.CharField(max_length=128, blank=True)
+  gender = models.CharField(max_length=16, blank=True, default="")
+  age_group = models.CharField(max_length=32, blank=True, default="")
   activity_time = models.DateTimeField(db_index=True)
   notes = models.TextField(blank=True)
 
@@ -18,6 +20,7 @@ class ActivityRecord(models.Model):
   location_y_pct = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
 
   photo_name = models.CharField(max_length=255, blank=True)
+  photo_preview_data_url = models.TextField(blank=True)
   photo_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
   photo_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
   photo_altitude = models.DecimalField(max_digits=9, decimal_places=2, null=True, blank=True)

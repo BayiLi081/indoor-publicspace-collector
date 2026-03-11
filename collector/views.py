@@ -16,10 +16,26 @@ from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
+from .floorplan_svg import convert_jpg_floorplan_to_svg, should_regenerate_jpg_wrapper
 from .models import ActivityRecord
 
 ROOT_BUILDING_ID = "__root__"
 MAP_EXTENSIONS = {".svg", ".png", ".jpg", ".jpeg", ".webp"}
+MAX_PHOTO_PREVIEW_LENGTH = 180_000
+ALLOWED_GENDERS = {"male", "female"}
+ALLOWED_AGE_GROUPS = {
+  "<10 years old",
+  "10-20 years old",
+  "20-60 years old",
+  ">60 years old",
+}
+MAP_EXTENSION_PRIORITY = {
+  ".svg": 0,
+  ".png": 1,
+  ".webp": 2,
+  ".jpg": 3,
+  ".jpeg": 4,
+}
 
 
 @ensure_csrf_cookie
@@ -51,6 +67,8 @@ def api_records(request: HttpRequest) -> JsonResponse:
         query = query.filter(
           Q(activity_type__icontains=search_text)
           | Q(actor_id__icontains=search_text)
+          | Q(gender__icontains=search_text)
+          | Q(age_group__icontains=search_text)
           | Q(notes__icontains=search_text)
           | Q(photo_name__icontains=search_text)
           | Q(building_id__icontains=search_text)
@@ -138,6 +156,8 @@ def build_record_from_payload(payload: dict[str, Any]) -> ActivityRecord:
   floor_id = require_non_empty_string(payload, "floorId")
   activity_type = require_non_empty_string(payload, "activityType")
   actor_id = optional_string(payload.get("actorId"))
+  gender = parse_gender(payload.get("gender"))
+  age_group = parse_age_group(payload.get("ageGroup"))
   notes = optional_string(payload.get("notes"))
   activity_time = parse_required_datetime(payload.get("activityTime"), "activityTime")
 
@@ -145,6 +165,7 @@ def build_record_from_payload(payload: dict[str, Any]) -> ActivityRecord:
   location_x_pct, location_y_pct = parse_location(location)
 
   photo_name = optional_string(payload.get("photoName"))
+  photo_preview_data_url = parse_photo_preview(payload.get("photoPreview"))
   photo_location = payload.get("photoLocation")
   photo_latitude, photo_longitude, photo_altitude = parse_photo_location(photo_location)
 
@@ -156,11 +177,14 @@ def build_record_from_payload(payload: dict[str, Any]) -> ActivityRecord:
     floor_id=floor_id,
     activity_type=activity_type,
     actor_id=actor_id,
+    gender=gender,
+    age_group=age_group,
     activity_time=activity_time,
     notes=notes,
     location_x_pct=location_x_pct,
     location_y_pct=location_y_pct,
     photo_name=photo_name,
+    photo_preview_data_url=photo_preview_data_url,
     photo_latitude=photo_latitude,
     photo_longitude=photo_longitude,
     photo_altitude=photo_altitude,
@@ -178,6 +202,26 @@ def optional_string(value: Any) -> str:
   if value is None:
     return ""
   return str(value).strip()
+
+
+def parse_gender(value: Any) -> str:
+  if not isinstance(value, str):
+    raise ValidationError({"gender": ["Gender is required."]})
+
+  normalized = value.strip().lower()
+  if normalized not in ALLOWED_GENDERS:
+    raise ValidationError({"gender": ["Gender must be either 'male' or 'female'."]})
+  return normalized
+
+
+def parse_age_group(value: Any) -> str:
+  if not isinstance(value, str):
+    raise ValidationError({"ageGroup": ["Age group is required."]})
+
+  normalized = value.strip()
+  if normalized not in ALLOWED_AGE_GROUPS:
+    raise ValidationError({"ageGroup": ["Age group is invalid."]})
+  return normalized
 
 
 def parse_required_datetime(value: Any, key: str):
@@ -240,6 +284,28 @@ def parse_photo_location(value: Any) -> tuple[Decimal | None, Decimal | None, De
   )
 
 
+def parse_photo_preview(value: Any) -> str:
+  if value is None:
+    return ""
+
+  if not isinstance(value, str):
+    raise ValidationError({"photoPreview": ["photoPreview must be a string."]})
+
+  preview = value.strip()
+  if not preview:
+    return ""
+
+  if not preview.startswith("data:image/") or ";base64," not in preview:
+    raise ValidationError({"photoPreview": ["photoPreview must be a base64 image data URL."]})
+
+  if len(preview) > MAX_PHOTO_PREVIEW_LENGTH:
+    raise ValidationError(
+      {"photoPreview": [f"photoPreview exceeds max length of {MAX_PHOTO_PREVIEW_LENGTH} characters."]}
+    )
+
+  return preview
+
+
 def parse_decimal(value: Any, key: str) -> Decimal:
   try:
     return Decimal(str(value))
@@ -277,10 +343,13 @@ def serialize_record(record: ActivityRecord) -> dict[str, Any]:
     "floorId": record.floor_id,
     "activityType": record.activity_type,
     "actorId": record.actor_id,
+    "gender": record.gender or None,
+    "ageGroup": record.age_group or None,
     "activityTime": isoformat_utc(record.activity_time),
     "notes": record.notes,
     "location": location,
     "photoName": record.photo_name or None,
+    "photoPreview": record.photo_preview_data_url or None,
     "photoLocation": photo_location,
   }
 
@@ -362,7 +431,11 @@ def extract_floor_maps(folder: Path) -> dict[str, Any]:
 
   file_entries = sorted(
     [entry for entry in folder.iterdir() if entry.is_file() and entry.suffix.lower() in MAP_EXTENSIONS],
-    key=lambda entry: natural_sort_key(entry.name),
+    key=lambda entry: (
+      natural_sort_key(entry.stem),
+      MAP_EXTENSION_PRIORITY.get(entry.suffix.lower(), 999),
+      natural_sort_key(entry.name),
+    ),
   )
 
   for file_entry in file_entries:
@@ -370,13 +443,28 @@ def extract_floor_maps(folder: Path) -> dict[str, Any]:
     if floor_id in floors:
       continue
 
-    relative_path = file_entry.relative_to(settings.ASSETS_DIR).as_posix()
+    floor_map_path = resolve_floor_map_path(file_entry)
+    relative_path = floor_map_path.relative_to(settings.ASSETS_DIR).as_posix()
     floors[floor_id] = {
       "label": format_floor_label(floor_id),
       "mapSrc": f"/assets/{relative_path}",
     }
 
   return floors
+
+
+def resolve_floor_map_path(file_path: Path) -> Path:
+  if file_path.suffix.lower() not in {".jpg", ".jpeg"}:
+    return file_path
+
+  svg_path = file_path.with_suffix(".svg")
+  if svg_path.exists() and not should_regenerate_jpg_wrapper(svg_path, file_path):
+    return svg_path
+
+  try:
+    return convert_jpg_floorplan_to_svg(file_path, svg_path=svg_path, overwrite=True)
+  except (OSError, ValueError):
+    return svg_path if svg_path.exists() else file_path
 
 
 def legacy_building_maps() -> dict[str, Any]:

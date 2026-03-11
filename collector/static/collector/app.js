@@ -1,10 +1,23 @@
-import { extractPhotoLocationFromImage } from "./image-location.js";
+import { extractPhotoLocationFromImage, requestCurrentDeviceLocation } from "./image-location.js";
 
 const API_BUILDINGS = "/api/buildings/";
 const API_RECORDS = "/api/records/";
 const API_RECORDS_EXPORT = "/api/records/export/";
 
 const ROOT_BUILDING_ID = "__root__";
+const DEFAULT_BUILDING_ID = "One-Punggol";
+const DEFAULT_FLOOR_ID = "Floor-1";
+const MAX_PREVIEW_BYTES = 100 * 1024;
+const MAX_PREVIEW_DATA_URL_LENGTH = 180000;
+const PREVIEW_MAX_DIMENSION = 240;
+const PREVIEW_MIN_DIMENSION = 56;
+const PREVIEW_DATA_URL_PATTERN = /^data:image\/(jpeg|jpg|png|webp);base64,[a-z0-9+/=]+$/i;
+const AUTO_ACTOR_ID_PATTERN = /^CL(\d+)-P(\d+)$/i;
+const MIN_MAP_ZOOM = 0.25;
+const MAX_MAP_ZOOM = 8;
+const MAP_ZOOM_STEP = 0.1;
+const DEFAULT_MAP_ZOOM = 1;
+const WHEEL_ZOOM_SENSITIVITY = 0.0016;
 
 const LEGACY_BUILDING_MAPS = {
   [ROOT_BUILDING_ID]: {
@@ -18,12 +31,14 @@ const LEGACY_BUILDING_MAPS = {
 };
 
 const mapWrap = document.getElementById("mapWrap");
+const mapCanvas = document.getElementById("mapCanvas");
 const mapImage = document.getElementById("mapImage");
 const buildingSelect = document.getElementById("buildingSelect");
 const floorSelect = document.getElementById("floorSelect");
 const activityForm = document.getElementById("activityForm");
 const activityType = document.getElementById("activityType");
 const actorId = document.getElementById("actorId");
+const ageGroup = document.getElementById("ageGroup");
 const activityTime = document.getElementById("activityTime");
 const photoInput = document.getElementById("photoInput");
 const photoLocationStatus = document.getElementById("photoLocationStatus");
@@ -33,16 +48,35 @@ const recordsTbody = document.getElementById("recordsTbody");
 const searchInput = document.getElementById("searchInput");
 const exportBtn = document.getElementById("exportBtn");
 const resetFormBtn = document.getElementById("resetFormBtn");
-const clearMarkersBtn = document.getElementById("clearMarkersBtn");
+const collectToggleBtn = document.getElementById("collectToggleBtn");
+const collectStatus = document.getElementById("collectStatus");
+const zoomOutBtn = document.getElementById("zoomOutBtn");
+const zoomInBtn = document.getElementById("zoomInBtn");
+const zoomResetBtn = document.getElementById("zoomResetBtn");
+const zoomValue = document.getElementById("zoomValue");
+const genderButtons = Array.from(document.querySelectorAll(".gender-btn[data-gender]"));
+const savePrompt = document.getElementById("savePrompt");
 
 let records = [];
 let selectedPoint = null;
+let selectedPointTimestampIso = "";
+let selectedGender = "";
 let selectedPhotoLocation = null;
 let selectedPhotoName = "";
+let selectedPhotoPreviewDataUrl = "";
 let isPhotoLocationLoading = false;
 let buildingMaps = {};
 let currentBuildingId = "";
 let currentFloorId = "";
+let isCollecting = false;
+let currentClusterNumber = 0;
+let currentPersonNumber = 0;
+let lastGeneratedClusterNumber = 0;
+let savePromptTimerId = 0;
+let mapZoomLevel = DEFAULT_MAP_ZOOM;
+let lastZoomAnchor = null;
+let pinchStartDistance = 0;
+let pinchStartZoom = DEFAULT_MAP_ZOOM;
 
 initialize().catch((error) => {
   console.error("Initialization failed:", error);
@@ -52,6 +86,7 @@ initialize().catch((error) => {
 async function initialize() {
   activityTime.value = toDateTimeLocalValue(new Date());
   setPhotoLocationStatus("No image selected.", "muted");
+  setSavePrompt("", "muted");
 
   buildingSelect.innerHTML = "<option>Loading...</option>";
   floorSelect.innerHTML = "<option>Loading...</option>";
@@ -59,15 +94,42 @@ async function initialize() {
   buildingSelect.addEventListener("change", onBuildingChange);
   floorSelect.addEventListener("change", onFloorChange);
   mapWrap.addEventListener("click", onMapClick);
+  mapWrap.addEventListener("wheel", onMapWheel, { passive: false });
+  mapWrap.addEventListener("pointermove", onMapPointerMove);
+  mapWrap.addEventListener("touchstart", onMapTouchStart, { passive: true });
+  mapWrap.addEventListener("touchmove", onMapTouchMove, { passive: false });
+  mapWrap.addEventListener("touchend", onMapTouchEnd, { passive: true });
+  mapWrap.addEventListener("touchcancel", onMapTouchEnd, { passive: true });
+  mapImage.addEventListener("load", () => {
+    renderMarkers();
+    updateZoomControls();
+  });
+  window.addEventListener("resize", () => {
+    renderMarkers();
+    updateZoomControls();
+  });
   photoInput.addEventListener("change", onPhotoChange);
   activityForm.addEventListener("submit", onFormSubmit);
   searchInput.addEventListener("input", renderRecords);
   exportBtn.addEventListener("click", onExport);
-  resetFormBtn.addEventListener("click", resetForm);
-  clearMarkersBtn.addEventListener("click", clearTemporarySelection);
+  resetFormBtn.addEventListener("click", () => resetForm(true, false));
+  collectToggleBtn.addEventListener("click", onCollectToggle);
+  if (zoomOutBtn && zoomInBtn && zoomResetBtn) {
+    zoomOutBtn.addEventListener("click", () => changeMapZoom(-MAP_ZOOM_STEP));
+    zoomInBtn.addEventListener("click", () => changeMapZoom(MAP_ZOOM_STEP));
+    zoomResetBtn.addEventListener("click", () => setMapZoom(DEFAULT_MAP_ZOOM, { preserveCenter: false }));
+  }
+  genderButtons.forEach((button) => {
+    button.addEventListener("click", () => setSelectedGender(button.dataset.gender || ""));
+  });
+  setMapZoom(DEFAULT_MAP_ZOOM, { preserveCenter: false });
+
+  setCollectionActive(false);
+  setSelectedGender("");
 
   await loadBuildingMaps();
   records = await loadRecords();
+  lastGeneratedClusterNumber = getMaxKnownClusterNumber(records);
   renderMarkers();
   renderRecords();
 }
@@ -81,10 +143,12 @@ async function loadBuildingMaps() {
   }
 
   const buildingIds = getBuildingIds();
-  currentBuildingId = buildingIds[0] || "";
+  currentBuildingId = buildingIds.includes(DEFAULT_BUILDING_ID)
+    ? DEFAULT_BUILDING_ID
+    : buildingIds[0] || "";
 
   renderBuildingOptions(currentBuildingId);
-  renderFloorOptions(currentBuildingId);
+  renderFloorOptions(currentBuildingId, DEFAULT_FLOOR_ID);
   currentFloorId = floorSelect.value || "";
 
   updateMapForSelection();
@@ -123,6 +187,133 @@ function onFloorChange(event) {
   updateMapForSelection();
   clearTemporarySelection();
   renderRecords();
+}
+
+function onCollectToggle() {
+  if (isCollecting) {
+    finishCollection();
+    return;
+  }
+  startCollection();
+}
+
+function startCollection() {
+  initializeAutoIdsForCollection();
+  setCollectionActive(true);
+  clearTemporarySelection();
+  setCollectStatus(
+    `Collecting started for ${getCurrentClusterIdLabel()}. Tap one person on the map, fill form, and save.`,
+    "active"
+  );
+}
+
+function finishCollection() {
+  setCollectionActive(false);
+  clearTemporarySelection();
+  clearAutoIdsForCollection();
+  setCollectStatus("Collection ended. Click Start to begin a new cluster.", "muted");
+}
+
+function setCollectionActive(active) {
+  isCollecting = !!active;
+  collectToggleBtn.textContent = isCollecting ? "End" : "Start";
+  collectToggleBtn.classList.toggle("active", isCollecting);
+  collectToggleBtn.setAttribute("aria-pressed", isCollecting ? "true" : "false");
+}
+
+function setCollectStatus(message, state = "muted") {
+  collectStatus.textContent = message;
+  collectStatus.dataset.state = state;
+}
+
+function setSelectedGender(value) {
+  selectedGender = value === "male" || value === "female" ? value : "";
+  genderButtons.forEach((button) => {
+    const isActive = button.dataset.gender === selectedGender;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function initializeAutoIdsForCollection() {
+  lastGeneratedClusterNumber = Math.max(lastGeneratedClusterNumber, getMaxKnownClusterNumber(records));
+  currentClusterNumber = lastGeneratedClusterNumber + 1;
+  lastGeneratedClusterNumber = currentClusterNumber;
+  currentPersonNumber = 1;
+  actorId.value = buildAutoActorId(currentClusterNumber, currentPersonNumber);
+}
+
+function clearAutoIdsForCollection() {
+  currentClusterNumber = 0;
+  currentPersonNumber = 0;
+  actorId.value = "";
+}
+
+function advanceAutoPersonId() {
+  if (!currentClusterNumber) {
+    return;
+  }
+
+  currentPersonNumber = Math.max(1, currentPersonNumber) + 1;
+  actorId.value = buildAutoActorId(currentClusterNumber, currentPersonNumber);
+}
+
+function restoreCurrentAutoPersonId() {
+  if (!currentClusterNumber) {
+    actorId.value = "";
+    return;
+  }
+
+  currentPersonNumber = Math.max(1, currentPersonNumber);
+  actorId.value = buildAutoActorId(currentClusterNumber, currentPersonNumber);
+}
+
+function getCurrentClusterIdLabel() {
+  if (!currentClusterNumber) {
+    return "";
+  }
+  return `CL${String(currentClusterNumber).padStart(4, "0")}`;
+}
+
+function buildAutoActorId(clusterNumber, personNumber) {
+  return `CL${String(clusterNumber).padStart(4, "0")}-P${String(personNumber).padStart(3, "0")}`;
+}
+
+function getMaxKnownClusterNumber(values) {
+  if (!Array.isArray(values)) {
+    return 0;
+  }
+
+  let maxClusterNumber = 0;
+  values.forEach((record) => {
+    const parsedActor = parseAutoActorId(record && record.actorId);
+    if (!parsedActor) {
+      return;
+    }
+
+    maxClusterNumber = Math.max(maxClusterNumber, parsedActor.clusterNumber);
+  });
+
+  return maxClusterNumber;
+}
+
+function parseAutoActorId(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const match = value.trim().match(AUTO_ACTOR_ID_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  const clusterNumber = Number.parseInt(match[1], 10);
+  const personNumber = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(clusterNumber) || !Number.isFinite(personNumber)) {
+    return null;
+  }
+
+  return { clusterNumber, personNumber };
 }
 
 function renderBuildingOptions(preferredBuildingId = "") {
@@ -189,8 +380,173 @@ function updateMapForSelection() {
   mapImage.alt = `Indoor map ${getBuildingLabel(currentBuildingId)} ${currentFloor.label}`;
 }
 
+function changeMapZoom(delta) {
+  setMapZoom(mapZoomLevel + delta, { anchor: lastZoomAnchor });
+}
+
+function setMapZoom(nextZoom, options = {}) {
+  const preserveCenter = options.preserveCenter !== false;
+  const anchor = normalizeZoomAnchor(options.anchor);
+  const clampedZoom = clampZoom(nextZoom);
+  if (!Number.isFinite(clampedZoom)) {
+    return;
+  }
+
+  const previousWidth = mapCanvas ? mapCanvas.clientWidth : 0;
+  const previousHeight = mapCanvas ? mapCanvas.clientHeight : 0;
+  const fallbackAnchor = preserveCenter ? { x: mapWrap.clientWidth / 2, y: mapWrap.clientHeight / 2 } : null;
+  const activeAnchor = anchor || fallbackAnchor;
+
+  let anchorXRatio = 0.5;
+  let anchorYRatio = 0.5;
+  if (activeAnchor && previousWidth && previousHeight) {
+    anchorXRatio = (mapWrap.scrollLeft + activeAnchor.x) / previousWidth;
+    anchorYRatio = (mapWrap.scrollTop + activeAnchor.y) / previousHeight;
+  }
+
+  mapZoomLevel = clampedZoom;
+  if (mapCanvas) {
+    mapCanvas.style.width = `${(mapZoomLevel * 100).toFixed(2)}%`;
+  }
+  updateZoomControls();
+  renderMarkers();
+
+  if (activeAnchor && mapCanvas) {
+    const nextWidth = mapCanvas.clientWidth || previousWidth;
+    const nextHeight = mapCanvas.clientHeight || previousHeight;
+    if (nextWidth) {
+      mapWrap.scrollLeft = clampScrollValue(nextWidth * anchorXRatio - activeAnchor.x);
+    }
+    if (nextHeight) {
+      mapWrap.scrollTop = clampScrollValue(nextHeight * anchorYRatio - activeAnchor.y);
+    }
+  }
+}
+
+function clampZoom(value) {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_MAP_ZOOM;
+  }
+  return Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, value));
+}
+
+function updateZoomControls() {
+  if (!zoomValue || !zoomOutBtn || !zoomInBtn) {
+    return;
+  }
+
+  const zoomPercent = Math.round(mapZoomLevel * 100);
+  zoomValue.textContent = `${zoomPercent}%`;
+  zoomOutBtn.disabled = mapZoomLevel <= MIN_MAP_ZOOM + 0.0001;
+  zoomInBtn.disabled = mapZoomLevel >= MAX_MAP_ZOOM - 0.0001;
+}
+
+function onMapWheel(event) {
+  if (!mapImage || !mapImage.getAttribute("src")) {
+    return;
+  }
+
+  event.preventDefault();
+  const anchor = getAnchorFromClientPoint(event.clientX, event.clientY);
+  if (anchor) {
+    lastZoomAnchor = anchor;
+  }
+
+  const zoomFactor = Math.exp(-event.deltaY * WHEEL_ZOOM_SENSITIVITY);
+  setMapZoom(mapZoomLevel * zoomFactor, { anchor });
+}
+
+function onMapPointerMove(event) {
+  if (event.pointerType === "mouse" && event.buttons !== 0) {
+    return;
+  }
+  lastZoomAnchor = getAnchorFromClientPoint(event.clientX, event.clientY);
+}
+
+function onMapTouchStart(event) {
+  if (event.touches.length !== 2) {
+    return;
+  }
+
+  pinchStartDistance = getTouchDistance(event.touches[0], event.touches[1]);
+  pinchStartZoom = mapZoomLevel;
+}
+
+function onMapTouchMove(event) {
+  if (event.touches.length !== 2 || !pinchStartDistance) {
+    return;
+  }
+
+  const nextDistance = getTouchDistance(event.touches[0], event.touches[1]);
+  if (!nextDistance) {
+    return;
+  }
+
+  event.preventDefault();
+  const anchor = getAnchorFromTouchPair(event.touches[0], event.touches[1]);
+  if (anchor) {
+    lastZoomAnchor = anchor;
+  }
+
+  const scale = nextDistance / pinchStartDistance;
+  setMapZoom(pinchStartZoom * scale, { anchor });
+}
+
+function onMapTouchEnd(event) {
+  if (event.touches.length < 2) {
+    pinchStartDistance = 0;
+    pinchStartZoom = mapZoomLevel;
+  }
+}
+
+function getTouchDistance(leftTouch, rightTouch) {
+  const dx = leftTouch.clientX - rightTouch.clientX;
+  const dy = leftTouch.clientY - rightTouch.clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function getAnchorFromTouchPair(leftTouch, rightTouch) {
+  const midpointX = (leftTouch.clientX + rightTouch.clientX) / 2;
+  const midpointY = (leftTouch.clientY + rightTouch.clientY) / 2;
+  return getAnchorFromClientPoint(midpointX, midpointY);
+}
+
+function getAnchorFromClientPoint(clientX, clientY) {
+  const rect = mapWrap.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    return null;
+  }
+
+  return normalizeZoomAnchor({
+    x: clientX - rect.left,
+    y: clientY - rect.top,
+  });
+}
+
+function normalizeZoomAnchor(anchor) {
+  if (!anchor || !Number.isFinite(anchor.x) || !Number.isFinite(anchor.y)) {
+    return null;
+  }
+
+  return {
+    x: Math.min(mapWrap.clientWidth, Math.max(0, anchor.x)),
+    y: Math.min(mapWrap.clientHeight, Math.max(0, anchor.y)),
+  };
+}
+
+function clampScrollValue(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, value);
+}
+
 function onMapClick(event) {
   if (event.target !== mapImage) return;
+  if (!isCollecting) {
+    setCollectStatus("Click Start before selecting map points.", "warn");
+    return;
+  }
 
   const rect = mapImage.getBoundingClientRect();
   const xPx = event.clientX - rect.left;
@@ -204,6 +560,9 @@ function onMapClick(event) {
     xPx: Math.round(xPx),
     yPx: Math.round(yPx),
   };
+  const clickTime = new Date();
+  selectedPointTimestampIso = clickTime.toISOString();
+  activityTime.value = toDateTimeLocalValue(clickTime);
 
   selectedCoords.textContent = `${selectedPoint.xPct}%, ${selectedPoint.yPct}%`;
   renderMarkers();
@@ -213,6 +572,7 @@ async function onPhotoChange(event) {
   const file = event.target.files?.[0];
   selectedPhotoLocation = null;
   selectedPhotoName = "";
+  selectedPhotoPreviewDataUrl = "";
 
   if (!file) {
     setPhotoLocationStatus("No image selected.", "muted");
@@ -220,6 +580,7 @@ async function onPhotoChange(event) {
   }
 
   selectedPhotoName = file.name;
+  selectedPhotoPreviewDataUrl = await createPhotoPreviewDataUrl(file);
   isPhotoLocationLoading = true;
   setPhotoLocationStatus("Reading GPS metadata from image...", "muted");
 
@@ -228,7 +589,21 @@ async function onPhotoChange(event) {
     selectedPhotoLocation = extractedLocation;
 
     if (!extractedLocation) {
-      setPhotoLocationStatus("Image selected, but no GPS metadata was found.", "warn");
+      setPhotoLocationStatus("No EXIF GPS found. Requesting current device location...", "muted");
+      try {
+        const fallbackLocation = await requestCurrentDeviceLocation();
+        selectedPhotoLocation = fallbackLocation;
+        const fallbackText = `${formatCoordinate(fallbackLocation.latitude)}, ${formatCoordinate(
+          fallbackLocation.longitude
+        )}`;
+        setPhotoLocationStatus(`EXIF missing. Using current device location: ${fallbackText}`, "success");
+      } catch (fallbackError) {
+        const fallbackMessage =
+          fallbackError && typeof fallbackError.message === "string" && fallbackError.message
+            ? fallbackError.message
+            : "Could not get current device location.";
+        setPhotoLocationStatus(`Image selected, but GPS was unavailable: ${fallbackMessage}`, "warn");
+      }
       return;
     }
 
@@ -246,6 +621,11 @@ async function onPhotoChange(event) {
 async function onFormSubmit(event) {
   event.preventDefault();
 
+  if (!isCollecting) {
+    alert("Click Start before saving records.");
+    return;
+  }
+
   if (!currentBuildingId || !currentFloorId) {
     alert("No building/floor map is available. Check your assets folder.");
     return;
@@ -256,25 +636,46 @@ async function onFormSubmit(event) {
     return;
   }
 
-  if (!selectedPoint && !selectedPhotoLocation) {
-    alert("Please click a location on the map or attach a GPS-tagged image first.");
+  if (!selectedPoint) {
+    alert("Please click a person location on the map before saving.");
+    return;
+  }
+
+  if (!selectedGender) {
+    alert("Please select gender (male or female).");
+    return;
+  }
+
+  if (!ageGroup.value.trim()) {
+    alert("Please select an age group.");
+    return;
+  }
+
+  const autoActorId = actorId.value.trim();
+  if (!autoActorId) {
+    alert("Auto ID is unavailable. Click End and Start collection again.");
     return;
   }
 
   const parsedActivityTime = new Date(activityTime.value);
-  const safeActivityTime = Number.isNaN(parsedActivityTime.getTime())
+  const fallbackActivityTime = Number.isNaN(parsedActivityTime.getTime())
     ? new Date().toISOString()
     : parsedActivityTime.toISOString();
+  const safeActivityTime =
+    selectedPoint && selectedPointTimestampIso ? selectedPointTimestampIso : fallbackActivityTime;
 
   const payload = {
     buildingId: currentBuildingId,
     floorId: currentFloorId,
     activityType: activityType.value.trim(),
-    actorId: actorId.value.trim(),
+    actorId: autoActorId,
+    gender: selectedGender,
+    ageGroup: ageGroup.value.trim(),
     activityTime: safeActivityTime,
     notes: notes.value.trim(),
     location: selectedPoint ? { xPct: selectedPoint.xPct, yPct: selectedPoint.yPct } : null,
     photoName: selectedPhotoName || null,
+    photoPreview: selectedPhotoPreviewDataUrl || null,
     photoLocation: selectedPhotoLocation ? { ...selectedPhotoLocation } : null,
   };
 
@@ -294,10 +695,13 @@ async function onFormSubmit(event) {
       records.push(createdRecord);
     }
 
-    resetForm(false);
+    resetForm(false, true);
+    setSavePrompt(`Saved ${autoActorId} successfully.`, "success");
+    setCollectStatus("Record saved. Click next person point or End to finish.", "active");
     renderMarkers();
     renderRecords();
   } catch (error) {
+    setSavePrompt(`Could not save record: ${error.message}`, "error");
     alert(`Could not save record: ${error.message}`);
   }
 }
@@ -334,23 +738,39 @@ function getDownloadFilename(contentDispositionHeader) {
   return `indoor-activity-records-${new Date().toISOString().slice(0, 10)}.json`;
 }
 
-function resetForm(resetDateTime = true) {
+function resetForm(resetDateTime = true, advanceActorId = false) {
+  const previousActorId = actorId.value;
   activityForm.reset();
   if (resetDateTime) {
     activityTime.value = toDateTimeLocalValue(new Date());
   }
   selectedPoint = null;
+  selectedPointTimestampIso = "";
+  setSelectedGender("");
   selectedPhotoLocation = null;
   selectedPhotoName = "";
+  selectedPhotoPreviewDataUrl = "";
   isPhotoLocationLoading = false;
   photoInput.value = "";
   selectedCoords.textContent = "None";
   setPhotoLocationStatus("No image selected.", "muted");
+  if (isCollecting && currentClusterNumber) {
+    if (advanceActorId) {
+      advanceAutoPersonId();
+    } else if (previousActorId) {
+      actorId.value = previousActorId;
+    } else {
+      restoreCurrentAutoPersonId();
+    }
+  } else {
+    actorId.value = "";
+  }
   renderMarkers();
 }
 
 function clearTemporarySelection() {
   selectedPoint = null;
+  selectedPointTimestampIso = "";
   selectedCoords.textContent = "None";
   renderMarkers();
 }
@@ -371,35 +791,155 @@ async function deleteRecord(id) {
 }
 
 function renderMarkers() {
-  mapWrap.querySelectorAll(".marker").forEach((node) => node.remove());
+  const overlayHost = mapCanvas || mapWrap;
+  overlayHost.querySelectorAll(".marker, .cluster-link").forEach((node) => node.remove());
 
-  records.forEach((record) => {
+  const visibleRecords = records.filter((record) => {
     const recordBuildingId = getRecordBuildingId(record);
     if (recordBuildingId !== currentBuildingId) {
-      return;
+      return false;
     }
 
     const recordFloorId = getRecordFloorId(record, recordBuildingId);
     if (recordFloorId !== currentFloorId) {
-      return;
+      return false;
     }
 
-    if (hasMapLocation(record.location)) {
-      createMarker(record.location.xPct, record.location.yPct, false);
-    }
+    return hasMapLocation(record.location);
+  });
+
+  drawClusterLinks(visibleRecords);
+
+  visibleRecords.forEach((record) => {
+    createMarker(record.location.xPct, record.location.yPct, false);
   });
 
   if (selectedPoint) {
+    drawSelectedPointClusterLink(visibleRecords);
     createMarker(selectedPoint.xPct, selectedPoint.yPct, true);
   }
 }
 
+function drawClusterLinks(visibleRecords) {
+  const clusterPoints = new Map();
+
+  visibleRecords.forEach((record) => {
+    const parsedActor = parseAutoActorId(record.actorId);
+    if (!parsedActor || !hasMapLocation(record.location)) {
+      return;
+    }
+
+    const currentPoints = clusterPoints.get(parsedActor.clusterNumber) || [];
+    currentPoints.push({
+      xPct: record.location.xPct,
+      yPct: record.location.yPct,
+      personNumber: parsedActor.personNumber,
+      activityTime: record.activityTime || "",
+    });
+    clusterPoints.set(parsedActor.clusterNumber, currentPoints);
+  });
+
+  clusterPoints.forEach((points) => {
+    points.sort((left, right) => {
+      if (left.personNumber !== right.personNumber) {
+        return left.personNumber - right.personNumber;
+      }
+      return String(left.activityTime).localeCompare(String(right.activityTime));
+    });
+
+    for (let index = 1; index < points.length; index += 1) {
+      createClusterLink(points[index - 1], points[index], false);
+    }
+  });
+}
+
+function drawSelectedPointClusterLink(visibleRecords) {
+  if (!selectedPoint || !isCollecting || !currentClusterNumber) {
+    return;
+  }
+
+  const currentClusterRecords = visibleRecords
+    .map((record) => {
+      const parsedActor = parseAutoActorId(record.actorId);
+      if (!parsedActor || parsedActor.clusterNumber !== currentClusterNumber) {
+        return null;
+      }
+
+      return {
+        xPct: record.location.xPct,
+        yPct: record.location.yPct,
+        personNumber: parsedActor.personNumber,
+        activityTime: record.activityTime || "",
+      };
+    })
+    .filter((entry) => entry !== null);
+
+  if (!currentClusterRecords.length) {
+    return;
+  }
+
+  currentClusterRecords.sort((left, right) => {
+    if (left.personNumber !== right.personNumber) {
+      return left.personNumber - right.personNumber;
+    }
+    return String(left.activityTime).localeCompare(String(right.activityTime));
+  });
+
+  const lastPoint = currentClusterRecords[currentClusterRecords.length - 1];
+  createClusterLink(lastPoint, selectedPoint, true);
+}
+
+function createClusterLink(fromPoint, toPoint, preview) {
+  const overlayHost = mapCanvas || mapWrap;
+  const fromPixels = toMapPixelPoint(fromPoint);
+  const toPixels = toMapPixelPoint(toPoint);
+  if (!fromPixels || !toPixels) {
+    return;
+  }
+
+  const dx = toPixels.x - fromPixels.x;
+  const dy = toPixels.y - fromPixels.y;
+  const length = Math.sqrt(dx * dx + dy * dy);
+
+  if (!Number.isFinite(length) || length <= 0) {
+    return;
+  }
+
+  const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  const line = document.createElement("span");
+  line.className = preview ? "cluster-link preview" : "cluster-link";
+  line.style.left = `${fromPixels.x}px`;
+  line.style.top = `${fromPixels.y}px`;
+  line.style.width = `${length}px`;
+  line.style.transform = `translateY(-50%) rotate(${angle}deg)`;
+  overlayHost.appendChild(line);
+}
+
+function toMapPixelPoint(point) {
+  const overlayHost = mapCanvas || mapWrap;
+  if (!point || typeof point.xPct !== "number" || typeof point.yPct !== "number") {
+    return null;
+  }
+
+  const mapWidth = mapImage.clientWidth || overlayHost.clientWidth;
+  const mapHeight = mapImage.clientHeight || overlayHost.clientHeight;
+  if (!mapWidth || !mapHeight) {
+    return null;
+  }
+
+  return {
+    x: (point.xPct / 100) * mapWidth,
+    y: (point.yPct / 100) * mapHeight,
+  };
+}
+
 function createMarker(xPct, yPct, selected) {
+  const overlayHost = mapCanvas || mapWrap;
   const marker = document.createElement("span");
   marker.className = selected ? "marker selected" : "marker";
   marker.style.left = `${xPct}%`;
   marker.style.top = `${yPct}%`;
-  mapWrap.appendChild(marker);
+  overlayHost.appendChild(marker);
 }
 
 function renderRecords() {
@@ -422,6 +962,8 @@ function renderRecords() {
       const target = [
         record.activityType,
         record.actorId,
+        formatGender(record.gender),
+        formatAgeGroup(record.ageGroup),
         record.notes,
         getBuildingLabel(recordBuildingId),
         getFloorLabel(recordBuildingId, recordFloorId),
@@ -439,7 +981,7 @@ function renderRecords() {
 
   if (filtered.length === 0) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="9">No records yet for this building and floor.</td>`;
+    tr.innerHTML = `<td colspan="12">No records yet for this building and floor.</td>`;
     recordsTbody.appendChild(tr);
     return;
   }
@@ -453,9 +995,12 @@ function renderRecords() {
       <td>${formatDate(record.activityTime)}</td>
       <td>${escapeHtml(record.activityType)}</td>
       <td>${escapeHtml(record.actorId || "-")}</td>
+      <td>${escapeHtml(formatGender(record.gender))}</td>
+      <td>${escapeHtml(formatAgeGroup(record.ageGroup))}</td>
       <td>${escapeHtml(getBuildingLabel(recordBuildingId))}</td>
       <td>${escapeHtml(getFloorLabel(recordBuildingId, recordFloorId))}</td>
       <td>${escapeHtml(formatMapLocation(record.location))}</td>
+      <td>${formatPhotoPreviewCell(record.photoPreview, record.photoName)}</td>
       <td>${escapeHtml(formatPhotoLocationText(record.photoLocation, record.photoName))}</td>
       <td>${escapeHtml(record.notes || "-")}</td>
       <td><button type="button" class="danger" data-delete-id="${record.id}">Delete</button></td>
@@ -488,9 +1033,12 @@ function normalizeRecord(record) {
     ...record,
     buildingId: typeof record.buildingId === "string" && record.buildingId.trim() ? record.buildingId : null,
     floorId: typeof record.floorId === "string" && record.floorId.trim() ? record.floorId : null,
+    gender: normalizeGender(record.gender),
+    ageGroup: normalizeAgeGroup(record.ageGroup),
     location: hasMapLocation(record.location) ? { ...record.location } : null,
     photoLocation: isValidPhotoLocation(record.photoLocation) ? { ...record.photoLocation } : null,
     photoName: typeof record.photoName === "string" && record.photoName.trim() ? record.photoName : null,
+    photoPreview: normalizePhotoPreview(record.photoPreview),
   };
 }
 
@@ -647,6 +1195,161 @@ function formatPhotoLocationText(photoLocation, photoName) {
   return normalizedPhotoName ? `${coordinates} (${normalizedPhotoName})` : coordinates;
 }
 
+function formatGender(gender) {
+  if (gender === "male") {
+    return "Male";
+  }
+  if (gender === "female") {
+    return "Female";
+  }
+  return "-";
+}
+
+function formatAgeGroup(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "-";
+}
+
+function normalizeGender(value) {
+  if (value === "male" || value === "female") {
+    return value;
+  }
+  return null;
+}
+
+function normalizeAgeGroup(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function formatPhotoPreviewCell(photoPreview, photoName) {
+  const normalizedPreview = normalizePhotoPreview(photoPreview);
+  if (!normalizedPreview) {
+    return "-";
+  }
+
+  const altText = escapeHtml(photoName ? `${photoName} preview` : "Photo preview");
+  return `<img class="record-photo-preview" src="${normalizedPreview}" alt="${altText}" loading="lazy" decoding="async">`;
+}
+
+function normalizePhotoPreview(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.length > MAX_PREVIEW_DATA_URL_LENGTH) {
+    return null;
+  }
+
+  if (!PREVIEW_DATA_URL_PATTERN.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
+}
+
+async function createPhotoPreviewDataUrl(file) {
+  if (!(file instanceof File)) {
+    return "";
+  }
+
+  let image;
+  try {
+    image = await loadImageFromFile(file);
+  } catch {
+    return "";
+  }
+
+  let targetWidth = image.naturalWidth || image.width;
+  let targetHeight = image.naturalHeight || image.height;
+  if (!targetWidth || !targetHeight) {
+    return "";
+  }
+
+  const sizeScale = Math.min(1, PREVIEW_MAX_DIMENSION / Math.max(targetWidth, targetHeight));
+  targetWidth = Math.max(1, Math.round(targetWidth * sizeScale));
+  targetHeight = Math.max(1, Math.round(targetHeight * sizeScale));
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d", { alpha: false });
+  if (!context) {
+    return "";
+  }
+
+  let bestAttempt = "";
+  for (let resizeAttempt = 0; resizeAttempt < 5; resizeAttempt += 1) {
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    context.clearRect(0, 0, targetWidth, targetHeight);
+    context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+    for (let quality = 0.82; quality >= 0.35; quality -= 0.12) {
+      const dataUrl = canvas.toDataURL("image/jpeg", quality);
+      const byteSize = estimateDataUrlByteSize(dataUrl);
+      if (byteSize <= MAX_PREVIEW_BYTES) {
+        return dataUrl;
+      }
+      bestAttempt = dataUrl;
+    }
+
+    const nextWidth = Math.max(PREVIEW_MIN_DIMENSION, Math.round(targetWidth * 0.82));
+    const nextHeight = Math.max(PREVIEW_MIN_DIMENSION, Math.round(targetHeight * 0.82));
+    if (nextWidth === targetWidth && nextHeight === targetHeight) {
+      break;
+    }
+
+    targetWidth = nextWidth;
+    targetHeight = nextHeight;
+  }
+
+  if (bestAttempt && estimateDataUrlByteSize(bestAttempt) <= MAX_PREVIEW_BYTES) {
+    return bestAttempt;
+  }
+  return "";
+}
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Could not decode image file."));
+    };
+
+    image.src = objectUrl;
+  });
+}
+
+function estimateDataUrlByteSize(dataUrl) {
+  if (typeof dataUrl !== "string") {
+    return 0;
+  }
+
+  const commaIndex = dataUrl.indexOf(",");
+  if (commaIndex < 0) {
+    return 0;
+  }
+
+  const base64 = dataUrl.slice(commaIndex + 1);
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.floor((base64.length * 3) / 4) - padding;
+}
+
 function toDateTimeLocalValue(date) {
   const pad = (value) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
@@ -667,6 +1370,26 @@ function formatCoordinate(value) {
 function setPhotoLocationStatus(message, state) {
   photoLocationStatus.textContent = message;
   photoLocationStatus.dataset.state = state;
+}
+
+function setSavePrompt(message, state = "muted") {
+  if (!savePrompt) {
+    return;
+  }
+
+  savePrompt.textContent = message;
+  savePrompt.dataset.state = state;
+
+  if (savePromptTimerId) {
+    window.clearTimeout(savePromptTimerId);
+    savePromptTimerId = 0;
+  }
+
+  if (state === "success" && message) {
+    savePromptTimerId = window.setTimeout(() => {
+      setSavePrompt("", "muted");
+    }, 2600);
+  }
 }
 
 function formatBuildingLabel(value) {

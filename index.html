@@ -22,16 +22,29 @@
           <label for="floorSelect">Floor</label>
           <select id="floorSelect" aria-label="Select floor"></select>
         </div>
-        <button id="clearMarkersBtn" type="button">Clear Markers</button>
+        <div class="panel-actions">
+          <div class="zoom-controls" role="group" aria-label="Map zoom controls">
+            <button id="zoomOutBtn" type="button" class="secondary zoom-btn" aria-label="Zoom out">-</button>
+            <span id="zoomValue" class="zoom-value">100%</span>
+            <button id="zoomInBtn" type="button" class="secondary zoom-btn" aria-label="Zoom in">+</button>
+            <button id="zoomResetBtn" type="button" class="secondary zoom-btn">Fit</button>
+          </div>
+          <div class="collect-controls">
+            <button id="collectToggleBtn" type="button" class="collect-toggle" aria-pressed="false">Start</button>
+          </div>
+        </div>
       </div>
 
       <div class="map-wrap" id="mapWrap">
-        <img
-          id="mapImage"
-          alt="Indoor map"
-        >
+        <div class="map-canvas" id="mapCanvas">
+          <img
+            id="mapImage"
+            alt="Indoor map"
+          >
+        </div>
       </div>
-      <p class="hint">Select building and floor, then click the map to pick an indoor point. You can also attach a GPS-tagged photo.</p>
+      <p id="collectStatus" class="collect-status" data-state="muted">Collection is idle. Click Start to begin.</p>
+      <p class="hint">Use + / - / Fit, mouse wheel, or pinch to zoom at any point. Click Start, tap one person position on the map, fill the short form, then save. Click End when the cluster is completed.</p>
     </section>
 
     <section class="form-panel">
@@ -50,9 +63,25 @@
           </select>
         </label>
 
+        <input id="actorId" type="hidden">
+
+        <div class="input-group">
+          <span>Gender</span>
+          <div class="gender-controls" id="genderControls">
+            <button type="button" class="gender-btn" data-gender="male" aria-pressed="false">Male</button>
+            <button type="button" class="gender-btn" data-gender="female" aria-pressed="false">Female</button>
+          </div>
+        </div>
+
         <label>
-          Person / Group ID
-          <input id="actorId" type="text" placeholder="e.g. P-12 or Group-A">
+          Age Group
+          <select id="ageGroup" required>
+            <option value="">Select age group</option>
+            <option value="<10 years old">&lt;10 years old</option>
+            <option value="10-20 years old">10-20 years old</option>
+            <option value="20-60 years old">20-60 years old</option>
+            <option value=">60 years old">&gt;60 years old</option>
+          </select>
         </label>
 
         <label>
@@ -80,6 +109,7 @@
           <button type="submit">Save Record</button>
           <button id="resetFormBtn" type="button" class="secondary">Reset</button>
         </div>
+        <p id="savePrompt" class="save-prompt" data-state="muted" role="status" aria-live="polite"></p>
       </form>
     </section>
   </main>
@@ -99,9 +129,12 @@
             <th>Time</th>
             <th>Activity</th>
             <th>ID</th>
+            <th>Gender</th>
+            <th>Age Group</th>
             <th>Building</th>
             <th>Floor</th>
             <th>Location (%)</th>
+            <th>Photo</th>
             <th>Photo GPS</th>
             <th>Notes</th>
             <th></th>
