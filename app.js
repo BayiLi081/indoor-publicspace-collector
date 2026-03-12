@@ -77,6 +77,9 @@ let mapZoomLevel = DEFAULT_MAP_ZOOM;
 let lastZoomAnchor = null;
 let pinchStartDistance = 0;
 let pinchStartZoom = DEFAULT_MAP_ZOOM;
+let touchPanState = null;
+let mousePanState = null;
+let suppressMapClickUntil = 0;
 
 initialize().catch((error) => {
   console.error("Initialization failed:", error);
@@ -95,11 +98,16 @@ async function initialize() {
   floorSelect.addEventListener("change", onFloorChange);
   mapWrap.addEventListener("click", onMapClick);
   mapWrap.addEventListener("wheel", onMapWheel, { passive: false });
+  mapWrap.addEventListener("pointerdown", onMapPointerDown);
   mapWrap.addEventListener("pointermove", onMapPointerMove);
+  mapWrap.addEventListener("pointerup", onMapPointerUp);
+  mapWrap.addEventListener("pointercancel", onMapPointerUp);
+  mapWrap.addEventListener("pointerleave", onMapPointerUp);
   mapWrap.addEventListener("touchstart", onMapTouchStart, { passive: true });
   mapWrap.addEventListener("touchmove", onMapTouchMove, { passive: false });
   mapWrap.addEventListener("touchend", onMapTouchEnd, { passive: true });
   mapWrap.addEventListener("touchcancel", onMapTouchEnd, { passive: true });
+  mapImage.addEventListener("dragstart", onMapImageDragStart);
   mapImage.addEventListener("load", () => {
     renderMarkers();
     updateZoomControls();
@@ -604,13 +612,70 @@ function onMapWheel(event) {
 }
 
 function onMapPointerMove(event) {
+  if (mousePanState && event.pointerId === mousePanState.pointerId) {
+    const deltaX = event.clientX - mousePanState.startClientX;
+    const deltaY = event.clientY - mousePanState.startClientY;
+    if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
+      mousePanState.hasDragged = true;
+    }
+
+    mapWrap.scrollLeft = clampScrollValue(mousePanState.startScrollLeft - deltaX);
+    mapWrap.scrollTop = clampScrollValue(mousePanState.startScrollTop - deltaY);
+    lastZoomAnchor = getAnchorFromClientPoint(event.clientX, event.clientY);
+    return;
+  }
+
   if (event.pointerType === "mouse" && event.buttons !== 0) {
     return;
   }
   lastZoomAnchor = getAnchorFromClientPoint(event.clientX, event.clientY);
 }
 
+function onMapPointerDown(event) {
+  if (event.pointerType !== "mouse" || event.button !== 0) {
+    return;
+  }
+  if (mapZoomLevel <= DEFAULT_MAP_ZOOM || !hasScrollableMapArea()) {
+    return;
+  }
+
+  mousePanState = {
+    pointerId: event.pointerId,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    startScrollLeft: mapWrap.scrollLeft,
+    startScrollTop: mapWrap.scrollTop,
+    hasDragged: false,
+  };
+  mapWrap.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+}
+
+function onMapPointerUp(event) {
+  if (!mousePanState || event.pointerId !== mousePanState.pointerId) {
+    return;
+  }
+
+  if (mousePanState.hasDragged) {
+    suppressMapClickUntil = Date.now() + 250;
+  }
+  mapWrap.releasePointerCapture?.(event.pointerId);
+  mousePanState = null;
+}
+
+function onMapImageDragStart(event) {
+  if (mapZoomLevel > DEFAULT_MAP_ZOOM) {
+    event.preventDefault();
+  }
+}
+
 function onMapTouchStart(event) {
+  if (event.touches.length === 1) {
+    startMapTouchPan(event.touches[0]);
+    return;
+  }
+
+  touchPanState = null;
   if (event.touches.length !== 2) {
     return;
   }
@@ -620,6 +685,25 @@ function onMapTouchStart(event) {
 }
 
 function onMapTouchMove(event) {
+  if (event.touches.length === 1 && touchPanState) {
+    const activeTouch = getTouchByIdentifier(event.touches, touchPanState.identifier);
+    if (!activeTouch) {
+      return;
+    }
+
+    const deltaX = activeTouch.clientX - touchPanState.startClientX;
+    const deltaY = activeTouch.clientY - touchPanState.startClientY;
+    if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
+      touchPanState.hasDragged = true;
+    }
+
+    event.preventDefault();
+    mapWrap.scrollLeft = clampScrollValue(touchPanState.startScrollLeft - deltaX);
+    mapWrap.scrollTop = clampScrollValue(touchPanState.startScrollTop - deltaY);
+    lastZoomAnchor = getAnchorFromClientPoint(activeTouch.clientX, activeTouch.clientY);
+    return;
+  }
+
   if (event.touches.length !== 2 || !pinchStartDistance) {
     return;
   }
@@ -644,6 +728,48 @@ function onMapTouchEnd(event) {
     pinchStartDistance = 0;
     pinchStartZoom = mapZoomLevel;
   }
+
+  if (touchPanState && event.touches.length === 1) {
+    const remainingTouch = event.touches[0];
+    startMapTouchPan(remainingTouch);
+    return;
+  }
+
+  if (touchPanState && touchPanState.hasDragged) {
+    suppressMapClickUntil = Date.now() + 250;
+  }
+  if (event.touches.length === 0) {
+    touchPanState = null;
+  }
+}
+
+function startMapTouchPan(touch) {
+  if (!touch || mapZoomLevel <= DEFAULT_MAP_ZOOM || !hasScrollableMapArea()) {
+    touchPanState = null;
+    return;
+  }
+
+  touchPanState = {
+    identifier: touch.identifier,
+    startClientX: touch.clientX,
+    startClientY: touch.clientY,
+    startScrollLeft: mapWrap.scrollLeft,
+    startScrollTop: mapWrap.scrollTop,
+    hasDragged: false,
+  };
+}
+
+function getTouchByIdentifier(touchList, identifier) {
+  for (const touch of touchList) {
+    if (touch.identifier === identifier) {
+      return touch;
+    }
+  }
+  return null;
+}
+
+function hasScrollableMapArea() {
+  return mapWrap.scrollWidth > mapWrap.clientWidth || mapWrap.scrollHeight > mapWrap.clientHeight;
 }
 
 function getTouchDistance(leftTouch, rightTouch) {
@@ -690,6 +816,7 @@ function clampScrollValue(value) {
 
 function onMapClick(event) {
   if (event.target !== mapImage) return;
+  if (Date.now() < suppressMapClickUntil) return;
   if (!isCollecting) {
     setCollectStatus("Click Start before selecting map points.", "warn");
     return;
