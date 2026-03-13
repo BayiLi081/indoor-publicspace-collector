@@ -17,6 +17,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
 from .floorplan_svg import convert_jpg_floorplan_to_svg, should_regenerate_jpg_wrapper
+from .locate_via_gps import GPSMappingError, locate_map_point_from_gps
 from .models import ActivityRecord
 
 ROOT_BUILDING_ID = "__root__"
@@ -47,6 +48,36 @@ def index(request: HttpRequest) -> HttpResponse:
 def api_buildings(request: HttpRequest) -> JsonResponse:
   building_maps = discover_building_maps()
   return JsonResponse({"buildings": building_maps})
+
+
+@require_http_methods(["GET"])
+def api_locate_via_gps(request: HttpRequest) -> JsonResponse:
+  building_id = request.GET.get("building_id", "").strip()
+  floor_id = request.GET.get("floor_id", "").strip()
+  latitude = request.GET.get("latitude")
+  longitude = request.GET.get("longitude")
+
+  if not building_id or not floor_id:
+    return JsonResponse({"error": "building_id and floor_id are required."}, status=400)
+
+  if latitude is None or longitude is None:
+    return JsonResponse({"error": "latitude and longitude are required."}, status=400)
+
+  try:
+    mapped_point = locate_map_point_from_gps(building_id, floor_id, latitude, longitude)
+  except GPSMappingError as exc:
+    return JsonResponse({"error": str(exc)}, status=400)
+
+  return JsonResponse(
+    {
+      "buildingId": building_id,
+      "floorId": floor_id,
+      "location": {
+        "xPct": float(mapped_point["xPct"]),
+        "yPct": float(mapped_point["yPct"]),
+      },
+    }
+  )
 
 
 @require_http_methods(["GET", "POST"])

@@ -18,6 +18,7 @@ This project has been rewritten from a static site into a Django application wit
 - Display a different indoor map per selected building/floor.
 - Click any point on the map to select an indoor location.
 - Capture/upload an image and extract GPS metadata (if available).
+- Use the "Locate via GPS" button to convert the device location into map percentages (calibrated via `assets/<building>/gps-map.json`) and drop a pin on the current floor plan.
 - Save activity details (type, ID, timestamp, notes) with map point and/or photo GPS.
 - Persist records in Django database.
 - Search, delete, and export records as JSON.
@@ -80,6 +81,8 @@ The server discovers maps in `assets/` using:
 
 1. `assets/buildings.manifest.json` (if present and valid), else
 2. filesystem scan of `assets/` directories/files.
+
+Additionally, optional `assets/<building>/gps-map.json` files can describe floor-level `referencePoints` (each with `xPct`, `yPct`, `latitude`, and `longitude`). The helper in `collector/locate_via_gps.py` uses those anchors to translate device GPS coordinates into map percentages for the Locate via GPS button.
 
 Supported map file extensions:
 

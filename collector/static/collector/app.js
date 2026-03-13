@@ -50,6 +50,8 @@ const exportBtn = document.getElementById("exportBtn");
 const resetFormBtn = document.getElementById("resetFormBtn");
 const collectToggleBtn = document.getElementById("collectToggleBtn");
 const collectStatus = document.getElementById("collectStatus");
+const locateViaGpsBtn = document.getElementById("locateViaGpsBtn");
+const locateStatus = document.getElementById("locateStatus");
 const zoomOutBtn = document.getElementById("zoomOutBtn");
 const zoomInBtn = document.getElementById("zoomInBtn");
 const zoomResetBtn = document.getElementById("zoomResetBtn");
@@ -74,6 +76,8 @@ let currentPersonNumber = 0;
 let lastGeneratedClusterNumber = 0;
 let savePromptTimerId = 0;
 let mapZoomLevel = DEFAULT_MAP_ZOOM;
+let userLocationPoint = null;
+let isLocatingViaGps = false;
 let lastZoomAnchor = null;
 let pinchStartDistance = 0;
 let pinchStartZoom = DEFAULT_MAP_ZOOM;
@@ -86,6 +90,7 @@ initialize().catch((error) => {
 async function initialize() {
   activityTime.value = toDateTimeLocalValue(new Date());
   setPhotoLocationStatus("No image selected.", "muted");
+  setLocateStatus("Tap Locate via GPS to see your approximate spot.", "muted");
   setSavePrompt("", "muted");
 
   buildingSelect.innerHTML = "<option>Loading...</option>";
@@ -122,6 +127,9 @@ async function initialize() {
   genderButtons.forEach((button) => {
     button.addEventListener("click", () => setSelectedGender(button.dataset.gender || ""));
   });
+  if (locateViaGpsBtn) {
+    locateViaGpsBtn.addEventListener("click", onLocateViaGps);
+  }
   setMapZoom(DEFAULT_MAP_ZOOM, { preserveCenter: false });
 
   setCollectionActive(false);
@@ -176,6 +184,8 @@ function onBuildingChange(event) {
   currentBuildingId = event.target.value;
   renderFloorOptions(currentBuildingId);
   currentFloorId = floorSelect.value || "";
+  userLocationPoint = null;
+  setLocateStatus("Tap Locate via GPS to see your approximate spot.", "muted");
 
   updateMapForSelection();
   clearTemporarySelection();
@@ -184,6 +194,8 @@ function onBuildingChange(event) {
 
 function onFloorChange(event) {
   currentFloorId = event.target.value;
+  userLocationPoint = null;
+  setLocateStatus("Tap Locate via GPS to see your approximate spot.", "muted");
   updateMapForSelection();
   clearTemporarySelection();
   renderRecords();
@@ -618,6 +630,66 @@ async function onPhotoChange(event) {
   }
 }
 
+async function onLocateViaGps() {
+  if (!locateViaGpsBtn || isLocatingViaGps) {
+    return;
+  }
+
+  if (!currentBuildingId || !currentFloorId) {
+    setLocateStatus("Select a building and floor first.", "warn");
+    return;
+  }
+
+  isLocatingViaGps = true;
+  locateViaGpsBtn.disabled = true;
+  setLocateStatus("Requesting device location...", "muted");
+
+  try {
+    const deviceLocation = await requestCurrentDeviceLocation();
+    const params = new URLSearchParams({
+      building_id: currentBuildingId,
+      floor_id: currentFloorId,
+      latitude: String(deviceLocation.latitude),
+      longitude: String(deviceLocation.longitude),
+    });
+
+    const response = await fetch(`/api/locate-via-gps/?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.error || `Server returned ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const location = payload?.location;
+    if (!location || typeof location.xPct !== "number" || typeof location.yPct !== "number") {
+      throw new Error("Server did not return a valid location.");
+    }
+
+    userLocationPoint = {
+      xPct: clampPercent(location.xPct),
+      yPct: clampPercent(location.yPct),
+      source: deviceLocation,
+    };
+
+    setLocateStatus(
+      `Image location ${round2(userLocationPoint.xPct)}%, ${round2(userLocationPoint.yPct)}%`,
+      "success"
+    );
+    renderMarkers();
+  } catch (error) {
+    console.error("Locate via GPS failed:", error);
+    userLocationPoint = null;
+    setLocateStatus(error?.message || "Could not determine location.", "error");
+    renderMarkers();
+  } finally {
+    isLocatingViaGps = false;
+    locateViaGpsBtn.disabled = false;
+  }
+}
+
 async function onFormSubmit(event) {
   event.preventDefault();
 
@@ -818,6 +890,9 @@ function renderMarkers() {
     drawSelectedPointClusterLink(visibleRecords);
     createMarker(selectedPoint.xPct, selectedPoint.yPct, true);
   }
+  if (userLocationPoint) {
+    renderUserLocationMarker();
+  }
 }
 
 function drawClusterLinks(visibleRecords) {
@@ -937,6 +1012,27 @@ function createMarker(xPct, yPct, selected) {
   const overlayHost = mapCanvas || mapWrap;
   const marker = document.createElement("span");
   marker.className = selected ? "marker selected" : "marker";
+  marker.style.left = `${xPct}%`;
+  marker.style.top = `${yPct}%`;
+  overlayHost.appendChild(marker);
+}
+
+function renderUserLocationMarker() {
+  if (!userLocationPoint) {
+    return;
+  }
+
+  createUserLocationMarker(userLocationPoint.xPct, userLocationPoint.yPct);
+}
+
+function createUserLocationMarker(xPct, yPct) {
+  const overlayHost = mapCanvas || mapWrap;
+  if (!overlayHost || !Number.isFinite(xPct) || !Number.isFinite(yPct)) {
+    return;
+  }
+
+  const marker = document.createElement("span");
+  marker.className = "marker user-location";
   marker.style.left = `${xPct}%`;
   marker.style.top = `${yPct}%`;
   overlayHost.appendChild(marker);
@@ -1372,6 +1468,15 @@ function setPhotoLocationStatus(message, state) {
   photoLocationStatus.dataset.state = state;
 }
 
+function setLocateStatus(message, state = "muted") {
+  if (!locateStatus) {
+    return;
+  }
+
+  locateStatus.textContent = message;
+  locateStatus.dataset.state = state;
+}
+
 function setSavePrompt(message, state = "muted") {
   if (!savePrompt) {
     return;
@@ -1421,6 +1526,14 @@ function toDisplayLabel(value) {
 
 function naturalCompare(left, right) {
   return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function clampPercent(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, value));
 }
 
 function round2(value) {

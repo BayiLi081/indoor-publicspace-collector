@@ -82,6 +82,26 @@ body {
   gap: 0.6rem;
 }
 
+.locate-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 170px;
+}
+
+.locate-status {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.locate-status[data-state="success"] {
+  color: #0b6f32;
+}
+
+.locate-status[data-state="error"] {
+  color: var(--danger);
+}
+
 .collect-controls {
   display: flex;
   align-items: center;
@@ -172,6 +192,13 @@ button.collect-toggle[aria-pressed="true"]:hover {
   background: #0f4ea5;
   box-shadow: 0 0 0 1px #0f4ea5;
   z-index: 4;
+}
+
+.marker.user-location {
+  background: #f7b500;
+  border-color: #fff;
+  box-shadow: 0 0 0 1px #fff, 0 0 0 3px rgba(247, 181, 0, 0.35);
+  z-index: 5;
 }
 
 .hint {
