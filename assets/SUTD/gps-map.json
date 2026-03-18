@@ -1,0 +1,50 @@
+{
+  "ground-floor": {
+    "referencePoints": [
+      {
+        "xPct": 9.84,
+        "yPct": 60.51,
+        "latitude": 1.340695073632722, 
+        "longitude": 103.96186726187796
+      },
+      {
+        "xPct": 33.55,
+        "yPct": 4.29,
+        "latitude": 1.3419282064981317, 
+        "longitude": 103.96274927803604
+      }
+    ]
+  },
+  "main-buildings": {
+    "referencePoints": [
+      {
+        "xPct": 9.84,
+        "yPct": 60.51,
+        "latitude": 1.340695073632722, 
+        "longitude": 103.96186726187796
+      },
+      {
+        "xPct": 33.55,
+        "yPct": 4.29,
+        "latitude": 1.3419282064981317, 
+        "longitude": 103.96274927803604
+      }
+    ]
+  },
+  "second-floor": {
+    "referencePoints": [
+      {
+        "xPct": 9.84,
+        "yPct": 60.51,
+        "latitude": 1.340695073632722, 
+        "longitude": 103.96186726187796
+      },
+      {
+        "xPct": 33.55,
+        "yPct": 4.29,
+        "latitude": 1.3419282064981317, 
+        "longitude": 103.96274927803604
+      }
+    ]
+  }
+}

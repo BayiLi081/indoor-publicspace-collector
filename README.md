@@ -30,6 +30,12 @@ This project has been rewritten from a static site into a Django application wit
 - `collector/` Django app (models, views, API, template, static frontend files).
 - `assets/` building/floor map files served at `/assets/...`.
 
+## Database Setup
+
+For PostgreSQL setup, required tables, and SQLite-to-PostgreSQL data migration steps, see `POSTGRESQL_SETUP.md`.
+
+For cloud deployment guidance for PostgreSQL and app configuration, see `database_cloud_setup.md`.
+
 ## Requirements
 
 - Python 3.10+
@@ -50,12 +56,37 @@ pip install -r requirements.txt
 
 ## Run Locally
 
+For a local PostgreSQL test setup, create a `.env` file in the project root. This file is ignored by git, so it is the right place for local database credentials.
+
+Use a dedicated PostgreSQL user for this app instead of the `postgres` superuser.
+
+```dotenv
+DJANGO_DB_ENGINE=postgresql
+DJANGO_DB_NAME=indoor_activities
+DJANGO_DB_USER=indoor_app
+DJANGO_DB_PASSWORD=your_strong_password
+DJANGO_DB_HOST=127.0.0.1
+DJANGO_DB_PORT=5432
+```
+
+Load the environment variables into your shell:
+
+```bash
+set -a
+source .env
+set +a
+```
+
+If you want to use SQLite for a quick local run, you can skip the `.env` file.
+
 1. Apply migrations:
 
 
 ```bash
 python3 manage.py migrate
 ```
+
+`migrate` will also sync the discovered buildings from `assets/` into the existing `buildings` table when that table is available in the configured database.
 
 2. Start server:
 

@@ -16,6 +16,31 @@ def env_list(name: str, default: str) -> list[str]:
   return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def env_str(name: str, default: str) -> str:
+  value = os.getenv(name)
+  if value is None:
+    return default
+  return value.strip()
+
+
+def build_db_options() -> dict[str, str]:
+  options: dict[str, str] = {}
+
+  sslmode = env_str("DJANGO_DB_SSLMODE", "")
+  if sslmode:
+    options["sslmode"] = sslmode
+
+  sslrootcert = env_str("DJANGO_DB_SSLROOTCERT", "")
+  if sslrootcert:
+    options["sslrootcert"] = sslrootcert
+
+  connect_timeout = env_str("DJANGO_DB_CONNECT_TIMEOUT", "")
+  if connect_timeout:
+    options["connect_timeout"] = connect_timeout
+
+  return options
+
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-me-in-production")
 DEBUG = env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,.azurewebsites.net")
@@ -64,12 +89,27 @@ TEMPLATES = [
 WSGI_APPLICATION = "indoor_collector.wsgi.application"
 ASGI_APPLICATION = "indoor_collector.asgi.application"
 
-DATABASES = {
-  "default": {
-    "ENGINE": "django.db.backends.sqlite3",
-    "NAME": BASE_DIR / "db.sqlite3",
+DB_ENGINE = env_str("DJANGO_DB_ENGINE", "sqlite").lower()
+if DB_ENGINE in {"postgres", "postgresql", "django.db.backends.postgresql"}:
+  db_options = build_db_options()
+  DATABASES = {
+    "default": {
+      "ENGINE": "django.db.backends.postgresql",
+      "NAME": env_str("DJANGO_DB_NAME", "indoor_activities"),
+      "USER": env_str("DJANGO_DB_USER", "postgres"),
+      "PASSWORD": env_str("DJANGO_DB_PASSWORD", ""),
+      "HOST": env_str("DJANGO_DB_HOST", "127.0.0.1"),
+      "PORT": env_str("DJANGO_DB_PORT", "5432"),
+      **({"OPTIONS": db_options} if db_options else {}),
+    }
   }
-}
+else:
+  DATABASES = {
+    "default": {
+      "ENGINE": "django.db.backends.sqlite3",
+      "NAME": Path(env_str("DJANGO_DB_NAME", str(BASE_DIR / "db.sqlite3"))),
+    }
+  }
 
 AUTH_PASSWORD_VALIDATORS = []
 
@@ -83,6 +123,7 @@ STATICFILES_DIRS = [BASE_DIR / "collector" / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 ASSETS_DIR = BASE_DIR / "assets"
+SYNC_BUILDINGS_ON_MIGRATE = env_bool("DJANGO_SYNC_BUILDINGS_ON_MIGRATE", True)
 
 # Azure App Service terminates TLS at the front door and forwards protocol via header.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

@@ -16,6 +16,7 @@ from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
+from .building_catalog import discover_building_maps as discover_building_maps_catalog
 from .floorplan_svg import convert_jpg_floorplan_to_svg, should_regenerate_jpg_wrapper
 from .locate_via_gps import GPSMappingError, locate_map_point_from_gps
 from .models import ActivityRecord
@@ -23,6 +24,20 @@ from .models import ActivityRecord
 ROOT_BUILDING_ID = "__root__"
 MAP_EXTENSIONS = {".svg", ".png", ".jpg", ".jpeg", ".webp"}
 MAX_PHOTO_PREVIEW_LENGTH = 180_000
+ALLOWED_ACTIVITY_TYPES = (
+  "Walking",
+  "Strolling",
+  "Sitting",
+  "Standing",
+  "Talking",
+  "Queueing",
+  "Phone Calling",
+  "Smoking",
+  "Others",
+)
+ACTIVITY_TYPE_ALIASES = {
+  "other": "Others",
+}
 ALLOWED_GENDERS = {"male", "female"}
 ALLOWED_AGE_GROUPS = {
   "<10 years old",
@@ -46,7 +61,7 @@ def index(request: HttpRequest) -> HttpResponse:
 
 @require_http_methods(["GET"])
 def api_buildings(request: HttpRequest) -> JsonResponse:
-  building_maps = discover_building_maps()
+  building_maps = discover_building_maps_catalog()
   return JsonResponse({"buildings": building_maps})
 
 
@@ -185,7 +200,7 @@ def database_error_response(error: Exception) -> JsonResponse:
 def build_record_from_payload(payload: dict[str, Any]) -> ActivityRecord:
   building_id = require_non_empty_string(payload, "buildingId")
   floor_id = require_non_empty_string(payload, "floorId")
-  activity_type = require_non_empty_string(payload, "activityType")
+  activity_type = parse_activity_type(payload.get("activityType"))
   actor_id = optional_string(payload.get("actorId"))
   gender = parse_gender(payload.get("gender"))
   age_group = parse_age_group(payload.get("ageGroup"))
@@ -233,6 +248,43 @@ def optional_string(value: Any) -> str:
   if value is None:
     return ""
   return str(value).strip()
+
+
+def parse_activity_type(value: Any) -> str:
+  if isinstance(value, str):
+    raw_values = value.split(",")
+  elif isinstance(value, (list, tuple)):
+    raw_values = list(value)
+  else:
+    raise ValidationError({"activityType": ["Select at least one activity type."]})
+
+  selected: set[str] = set()
+  for item in raw_values:
+    if not isinstance(item, str):
+      raise ValidationError({"activityType": ["Activity types must be strings."]})
+
+    normalized = normalize_activity_type_label(item)
+    if not normalized:
+      continue
+    selected.add(normalized)
+
+  if not selected:
+    raise ValidationError({"activityType": ["Select at least one activity type."]})
+
+  return ", ".join([activity for activity in ALLOWED_ACTIVITY_TYPES if activity in selected])
+
+
+def normalize_activity_type_label(value: str) -> str:
+  normalized = value.strip()
+  if not normalized:
+    return ""
+
+  aliased = ACTIVITY_TYPE_ALIASES.get(normalized.lower(), normalized)
+  for activity in ALLOWED_ACTIVITY_TYPES:
+    if activity.lower() == aliased.lower():
+      return activity
+
+  raise ValidationError({"activityType": [f"'{normalized}' is not a valid activity type."]})
 
 
 def parse_gender(value: Any) -> str:

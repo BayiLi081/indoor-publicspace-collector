@@ -2,6 +2,7 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 
 class ActivityRecord(models.Model):
@@ -9,7 +10,7 @@ class ActivityRecord(models.Model):
   created_at = models.DateTimeField(auto_now_add=True)
   building_id = models.CharField(max_length=128, db_index=True)
   floor_id = models.CharField(max_length=128, db_index=True)
-  activity_type = models.CharField(max_length=64)
+  activity_type = models.CharField(max_length=255)
   actor_id = models.CharField(max_length=128, blank=True)
   gender = models.CharField(max_length=16, blank=True, default="")
   age_group = models.CharField(max_length=32, blank=True, default="")
@@ -45,3 +46,19 @@ class ActivityRecord(models.Model):
 
   def __str__(self) -> str:
     return f"{self.activity_type} @ {self.building_id}/{self.floor_id} ({self.activity_time.isoformat()})"
+
+
+class Building(models.Model):
+  id = models.AutoField(primary_key=True)
+  name = models.TextField()
+  address = models.TextField(blank=True, default="")
+  floors = models.TextField(blank=True, default="")
+  created_at = models.DateTimeField(default=timezone.now)
+
+  class Meta:
+    db_table = "buildings"
+    managed = False
+    ordering = ["name", "id"]
+
+  def __str__(self) -> str:
+    return self.name

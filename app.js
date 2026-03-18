@@ -4,8 +4,8 @@ const STORAGE_KEY = "indoor-activity-records-v1";
 const ASSETS_ROOT = "assets/";
 const BUILDINGS_MANIFEST_PATH = `${ASSETS_ROOT}buildings.manifest.json`;
 const ROOT_BUILDING_ID = "__root__";
-const DEFAULT_BUILDING_ID = "One-Punggol";
-const DEFAULT_FLOOR_ID = "Floor-1";
+const DEFAULT_BUILDING_ID = "SUTD";
+const DEFAULT_FLOOR_ID = "main-buildings";
 const MAX_PREVIEW_BYTES = 100 * 1024;
 const MAX_PREVIEW_DATA_URL_LENGTH = 180000;
 const PREVIEW_MAX_DIMENSION = 240;
@@ -18,16 +18,19 @@ const MAP_ZOOM_STEP = 0.1;
 const DEFAULT_MAP_ZOOM = 1;
 const WHEEL_ZOOM_SENSITIVITY = 0.0016;
 const MAP_FILE_PATTERN = /\.(svg|png|jpe?g|webp)$/i;
-
-const LEGACY_BUILDING_MAPS = {
-  [ROOT_BUILDING_ID]: {
-    label: "Main Building",
-    floors: {
-      "floor-1": { label: "Floor 1", mapSrc: "assets/floor-1.svg" },
-      "floor-2": { label: "Floor 2", mapSrc: "assets/floor-2.svg" },
-      "floor-3": { label: "Floor 3", mapSrc: "assets/floor-3.svg" },
-    },
-  },
+const ACTIVITY_TYPE_OPTIONS = [
+  "Walking",
+  "Strolling",
+  "Sitting",
+  "Standing",
+  "Talking",
+  "Queueing",
+  "Phone Calling",
+  "Smoking",
+  "Others",
+];
+const ACTIVITY_TYPE_ALIASES = {
+  other: "Others",
 };
 
 const mapWrap = document.getElementById("mapWrap");
@@ -56,12 +59,15 @@ const zoomOutBtn = document.getElementById("zoomOutBtn");
 const zoomInBtn = document.getElementById("zoomInBtn");
 const zoomResetBtn = document.getElementById("zoomResetBtn");
 const zoomValue = document.getElementById("zoomValue");
+const activityTypeButtons = Array.from(document.querySelectorAll(".activity-type-btn[data-activity-type]"));
 const genderButtons = Array.from(document.querySelectorAll(".gender-btn[data-gender]"));
+const ageGroupButtons = Array.from(document.querySelectorAll(".age-group-btn[data-age-group]"));
 const savePrompt = document.getElementById("savePrompt");
 
 let records = loadRecords();
 let selectedPoint = null;
 let selectedPointTimestampIso = "";
+let selectedActivityTypes = [];
 let selectedGender = "";
 let selectedPhotoLocation = null;
 let selectedPhotoName = "";
@@ -132,8 +138,14 @@ async function initialize() {
     zoomInBtn.addEventListener("click", () => changeMapZoom(MAP_ZOOM_STEP));
   zoomResetBtn.addEventListener("click", () => setMapZoom(DEFAULT_MAP_ZOOM, { preserveCenter: false }));
   }
+  activityTypeButtons.forEach((button) => {
+    button.addEventListener("click", () => toggleActivityType(button.dataset.activityType || ""));
+  });
   genderButtons.forEach((button) => {
     button.addEventListener("click", () => setSelectedGender(button.dataset.gender || ""));
+  });
+  ageGroupButtons.forEach((button) => {
+    button.addEventListener("click", () => setSelectedAgeGroup(button.dataset.ageGroup || ""));
   });
   if (locateViaGpsBtn) {
     locateViaGpsBtn.addEventListener("click", onLocateViaGps);
@@ -141,7 +153,9 @@ async function initialize() {
   setMapZoom(DEFAULT_MAP_ZOOM, { preserveCenter: false });
 
   setCollectionActive(false);
+  setSelectedActivityTypes([]);
   setSelectedGender("");
+  setSelectedAgeGroup("");
 
   await loadBuildingMaps();
   lastGeneratedClusterNumber = getMaxKnownClusterNumber(records);
@@ -393,10 +407,44 @@ function setCollectStatus(message, state = "muted") {
   collectStatus.dataset.state = state;
 }
 
+function toggleActivityType(value) {
+  const normalized = normalizeActivityTypeLabel(value);
+  if (!normalized) {
+    return;
+  }
+
+  const nextSelection = selectedActivityTypes.includes(normalized)
+    ? selectedActivityTypes.filter((item) => item !== normalized)
+    : [...selectedActivityTypes, normalized];
+  setSelectedActivityTypes(nextSelection);
+}
+
+function setSelectedActivityTypes(values) {
+  selectedActivityTypes = normalizeActivityTypeSelection(values);
+  activityType.value = selectedActivityTypes.join(", ");
+  activityTypeButtons.forEach((button) => {
+    const activity = normalizeActivityTypeLabel(button.dataset.activityType || "");
+    const isActive = selectedActivityTypes.includes(activity);
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
 function setSelectedGender(value) {
   selectedGender = value === "male" || value === "female" ? value : "";
   genderButtons.forEach((button) => {
     const isActive = button.dataset.gender === selectedGender;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function setSelectedAgeGroup(value) {
+  const selectedButton = ageGroupButtons.find((button) => button.dataset.ageGroup === value) || null;
+  const nextAgeGroup = selectedButton ? selectedButton.dataset.ageLabel || selectedButton.textContent.trim() : "";
+  ageGroup.value = nextAgeGroup;
+  ageGroupButtons.forEach((button) => {
+    const isActive = button === selectedButton;
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
@@ -992,6 +1040,11 @@ function onFormSubmit(event) {
     return;
   }
 
+  if (!selectedActivityTypes.length) {
+    alert("Please select at least one activity type.");
+    return;
+  }
+
   if (!ageGroup.value.trim()) {
     alert("Please select an age group.");
     return;
@@ -1054,7 +1107,9 @@ function resetForm(resetDateTime = true, advanceActorId = false) {
   }
   selectedPoint = null;
   selectedPointTimestampIso = "";
+  setSelectedActivityTypes([]);
   setSelectedGender("");
+  setSelectedAgeGroup("");
   selectedPhotoLocation = null;
   selectedPhotoName = "";
   selectedPhotoPreviewDataUrl = "";
@@ -1285,7 +1340,7 @@ function renderRecords() {
       }
 
       const target = [
-        record.activityType,
+        formatActivityType(record.activityType),
         record.actorId,
         formatGender(record.gender),
         formatAgeGroup(record.ageGroup),
@@ -1318,7 +1373,7 @@ function renderRecords() {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${formatDate(record.activityTime)}</td>
-      <td>${escapeHtml(record.activityType)}</td>
+      <td>${escapeHtml(formatActivityType(record.activityType))}</td>
       <td>${escapeHtml(record.actorId || "-")}</td>
       <td>${escapeHtml(formatGender(record.gender))}</td>
       <td>${escapeHtml(formatAgeGroup(record.ageGroup))}</td>
@@ -1360,6 +1415,7 @@ function normalizeRecord(record) {
     ...record,
     buildingId: typeof record.buildingId === "string" && record.buildingId.trim() ? record.buildingId : null,
     floorId: typeof record.floorId === "string" && record.floorId.trim() ? record.floorId : null,
+    activityType: normalizeActivityTypeValue(record.activityType),
     gender: normalizeGender(record.gender),
     ageGroup: normalizeAgeGroup(record.ageGroup),
     location: hasMapLocation(record.location) ? { ...record.location } : null,
@@ -1536,8 +1592,79 @@ function formatGender(gender) {
   return "-";
 }
 
+function formatActivityType(value) {
+  if (Array.isArray(value)) {
+    const normalized = normalizeActivityTypeSelection(value);
+    return normalized.length ? normalized.join(", ") : "-";
+  }
+
+  if (typeof value !== "string") {
+    return "-";
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "-";
+  }
+
+  const normalized = normalizeActivityTypeSelection(trimmed);
+  return normalized.length ? normalized.join(", ") : trimmed;
+}
+
 function formatAgeGroup(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "-";
+}
+
+function normalizeActivityTypeValue(value) {
+  if (Array.isArray(value)) {
+    const normalized = normalizeActivityTypeSelection(value);
+    return normalized.length ? normalized.join(", ") : null;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = normalizeActivityTypeSelection(trimmed);
+  return normalized.length ? normalized.join(", ") : trimmed;
+}
+
+function normalizeActivityTypeSelection(value) {
+  const rawValues = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : [];
+  const selected = new Set();
+
+  rawValues.forEach((candidate) => {
+    const normalized = normalizeActivityTypeLabel(candidate);
+    if (normalized) {
+      selected.add(normalized);
+    }
+  });
+
+  return ACTIVITY_TYPE_OPTIONS.filter((option) => selected.has(option));
+}
+
+function normalizeActivityTypeLabel(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const aliased = ACTIVITY_TYPE_ALIASES[trimmed.toLowerCase()] || trimmed;
+  const matchedOption = ACTIVITY_TYPE_OPTIONS.find((option) => option.toLowerCase() === aliased.toLowerCase());
+  return matchedOption || "";
 }
 
 function normalizeGender(value) {

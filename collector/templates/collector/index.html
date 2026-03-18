@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Indoor Activity Location Recorder</title>
-  <link rel="stylesheet" href="{% static 'collector/styles.css' %}">
+  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260318-4">
 </head>
 <body>
   <header class="topbar">
@@ -58,18 +58,22 @@
       <h2>Record Activity</h2>
       <form id="activityForm">
         {% csrf_token %}
-        <label>
-          Activity Type
-          <select id="activityType" required>
-            <option value="">Select activity</option>
-            <option>Walking</option>
-            <option>Sitting</option>
-            <option>Standing</option>
-            <option>Meeting</option>
-            <option>Queueing</option>
-            <option>Other</option>
-          </select>
-        </label>
+        <div class="input-group">
+          <span>Activity Type</span>
+          <input id="activityType" type="hidden">
+          <div class="activity-type-controls" id="activityTypeControls" role="group" aria-label="Activity type">
+            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Walking" aria-pressed="false">Walking</button>
+            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Strolling" aria-pressed="false">Strolling</button>
+            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Sitting" aria-pressed="false">Sitting</button>
+            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Standing" aria-pressed="false">Standing</button>
+            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Talking" aria-pressed="false">Talking</button>
+            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Queueing" aria-pressed="false">Queueing</button>
+            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Phone Calling" aria-pressed="false">Phone Calling</button>
+            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Smoking" aria-pressed="false">Smoking</button>
+            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Others" aria-pressed="false">Others</button>
+          </div>
+          <small class="field-hint">Select one or more activities.</small>
+        </div>
 
         <input id="actorId" type="hidden">
 
@@ -81,16 +85,16 @@
           </div>
         </div>
 
-        <label>
-          Age Group
-          <select id="ageGroup" required>
-            <option value="">Select age group</option>
-            <option value="<10 years old">&lt;10 years old</option>
-            <option value="10-20 years old">10-20 years old</option>
-            <option value="20-60 years old">20-60 years old</option>
-            <option value=">60 years old">&gt;60 years old</option>
-          </select>
-        </label>
+        <div class="input-group">
+          <span>Age Group</span>
+          <input id="ageGroup" type="hidden">
+          <div class="gender-controls age-group-controls" id="ageGroupControls" role="group" aria-label="Age group">
+            <button type="button" class="gender-btn age-group-btn" data-age-group="under-10" data-age-label="<10 years old" aria-pressed="false">&lt;10 years old</button>
+            <button type="button" class="gender-btn age-group-btn" data-age-group="10-20" data-age-label="10-20 years old" aria-pressed="false">10-20 years old</button>
+            <button type="button" class="gender-btn age-group-btn" data-age-group="20-60" data-age-label="20-60 years old" aria-pressed="false">20-60 years old</button>
+            <button type="button" class="gender-btn age-group-btn" data-age-group="over-60" data-age-label=">60 years old" aria-pressed="false">&gt;60 years old</button>
+          </div>
+        </div>
 
         <label>
           Date & Time
@@ -153,6 +157,6 @@
     </div>
   </section>
 
-  <script type="module" src="{% static 'collector/app.js' %}"></script>
+  <script type="module" src="{% static 'collector/app.js' %}?v=20260318-4"></script>
 </body>
 </html>
