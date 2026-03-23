@@ -494,6 +494,15 @@ function setMapZoom(nextZoom, options = {}) {
     return;
   }
 
+function changeGroupCount(delta) {
+  groupCount += delta;
+  if (groupCount < 2) groupCount = 1;
+  if (groupValue) {
+    groupValue.textContent = groupCount;
+  }
+  return groupCount
+  }
+
   const previousWidth = mapCanvas ? mapCanvas.clientWidth : 0;
   const previousHeight = mapCanvas ? mapCanvas.clientHeight : 0;
   const fallbackAnchor = preserveCenter ? { x: mapWrap.clientWidth / 2, y: mapWrap.clientHeight / 2 } : null;

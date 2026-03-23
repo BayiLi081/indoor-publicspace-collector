@@ -332,15 +332,18 @@ textarea {
 
 /* Group Counter */
 .groupcounter-controls {
+  display: none;
   align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
 }
 
 .grpcounter-btn {
   min-width: 2.2rem;
   padding: 0.45rem 0.55rem;
-  /* background: #fff;
+  background: #fff;
   border-color: var(--line);
-  color: var(--text); */
+  color: var(--text);
 }
 
 .group-value {
@@ -351,11 +354,11 @@ textarea {
   color: var(--muted);
 }
 
-/* .grpcounter-btn:hover {
+.grpcounter-btn:hover {
   background: #f3f7ff;
   border-color: #b8cae8;
   color: var(--text);
-} */
+}
 
 .activity-type-controls {
   display: grid;
