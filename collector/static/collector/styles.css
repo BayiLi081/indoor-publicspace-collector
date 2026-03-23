@@ -330,6 +330,33 @@ textarea {
   margin-bottom: 1rem;
 }
 
+/* Group Counter */
+.groupcounter-controls {
+  align-items: center;
+}
+
+.grpcounter-btn {
+  min-width: 2.2rem;
+  padding: 0.45rem 0.55rem;
+  /* background: #fff;
+  border-color: var(--line);
+  color: var(--text); */
+}
+
+.group-value {
+  min-width: 2rem;
+  text-align: center;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* .grpcounter-btn:hover {
+  background: #f3f7ff;
+  border-color: #b8cae8;
+  color: var(--text);
+} */
+
 .activity-type-controls {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

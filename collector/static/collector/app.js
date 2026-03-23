@@ -79,6 +79,10 @@ const ageGroupButtons = Array.from(document.querySelectorAll(".toggle-btn[data-a
 const indivGrpButtons = Array.from(document.querySelectorAll(".indivgrp-btn[data-indivgrp-type]"));
 const activityFormHeading = document.getElementById("activityFormHeading");
 const recordMode = document.getElementById("recordMode");
+const grpCounterDown = document.getElementById("grpCounterDown");
+const grpCounterUp = document.getElementById("grpCounterUp");
+const groupValue = document.getElementById("groupValue");
+const groupCounterContainer = document.getElementById("groupCounterContainer");
 const savePrompt = document.getElementById("savePrompt");
 
 let records = [];
@@ -104,6 +108,7 @@ let isLocatingViaGps = false;
 let lastZoomAnchor = null;
 let pinchStartDistance = 0;
 let pinchStartZoom = DEFAULT_MAP_ZOOM;
+let groupCount = 2;
 
 initialize().catch((error) => {
   console.error("Initialization failed:", error);
@@ -159,6 +164,10 @@ async function initialize() {
   indivGrpButtons.forEach((button) => {
     button.addEventListener("click", () => setRecordMode(button.dataset.indivgrpType || ""));
   });
+  if (grpCounterUp && grpCounterDown) {
+    grpCounterUp.addEventListener("click", () => changeGroupCount(1));
+    grpCounterDown.addEventListener("click", () => changeGroupCount(-1));
+  }
   if (locateViaGpsBtn) {
     locateViaGpsBtn.addEventListener("click", onLocateViaGps);
   }

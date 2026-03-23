@@ -66,6 +66,9 @@ const indivGrpButtons = Array.from(document.querySelectorAll(".indivgrp-btn[data
 const activityFormHeading = document.getElementById("activityFormHeading");
 const recordMode = document.getElementById("recordMode");
 const savePrompt = document.getElementById("savePrompt");
+const grpCounterDown= document.getElementById("grpCounterDown");
+const grpCounterUp = document.getElementById("grpCounterUp");
+const groupValue = document.getElementById("groupValue");
 
 let records = loadRecords();
 let selectedPoint = null;
@@ -140,6 +143,10 @@ async function initialize() {
     zoomOutBtn.addEventListener("click", () => changeMapZoom(-MAP_ZOOM_STEP));
     zoomInBtn.addEventListener("click", () => changeMapZoom(MAP_ZOOM_STEP));
   zoomResetBtn.addEventListener("click", () => setMapZoom(DEFAULT_MAP_ZOOM, { preserveCenter: false }));
+  }
+  if (grpCounterUp && grpCounterDown) {
+    grpCounterUp.addEventListener("click", () => changeGrpCount(1));
+    grpCounterDown.addEventListener("click", () => changeGrpCount(-1));
   }
   activityTypeButtons.forEach((button) => {
     button.addEventListener("click", () => toggleActivityType(button.dataset.activityType || ""));
@@ -624,6 +631,18 @@ function setMapZoom(nextZoom, options = {}) {
   const clampedZoom = clampZoom(nextZoom);
   if (!Number.isFinite(clampedZoom)) {
     return;
+  }
+
+  function changeGrpCount(delta) {
+    let groupCount = 2
+    groupCount += delta;
+
+  // Prevent going below 1 (or 0 if you prefer)
+  if (groupCount < 2) groupCount = 2;
+
+  if (groupValue) {
+    groupValue.textContent = groupCount;
+  }
   }
 
   const previousWidth = mapCanvas ? mapCanvas.clientWidth : 0;
