@@ -55,22 +55,31 @@
     </section>
 
     <section class="form-panel">
-      <h2>Record Activity</h2>
+      <h2>Observee Characteristics</h2>
+      <div class="indiv-group-selection">
+        <button type="button" class="toggle-btn indivgrp-btn" data-indivgrp-type="individual" aria-pressed="false">Individual</button>
+        <button type="button" class="toggle-btn indivgrp-btn" data-indivgrp-type="group" aria-pressed="false">Group</button>      
+      </div>
+
+      <h2 id="activityFormHeading">Record Activity</h2>
+      <input id="recordMode" type="hidden" value="individual">
       <form id="activityForm">
         {% csrf_token %}
         <div class="input-group">
           <span>Activity Type</span>
           <input id="activityType" type="hidden">
           <div class="activity-type-controls" id="activityTypeControls" role="group" aria-label="Activity type">
-            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Walking" aria-pressed="false">Walking</button>
-            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Strolling" aria-pressed="false">Strolling</button>
-            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Sitting" aria-pressed="false">Sitting</button>
-            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Standing" aria-pressed="false">Standing</button>
-            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Talking" aria-pressed="false">Talking</button>
-            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Queueing" aria-pressed="false">Queueing</button>
-            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Phone Calling" aria-pressed="false">Phone Calling</button>
-            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Smoking" aria-pressed="false">Smoking</button>
-            <button type="button" class="gender-btn activity-type-btn" data-activity-type="Others" aria-pressed="false">Others</button>
+            <button type="button" class="toggle-btn" data-activity-type="Walking" aria-pressed="false">Walking</button>
+            <button type="button" class="toggle-btn" data-activity-type="Strolling" aria-pressed="false">Strolling</button>
+            <button type="button" class="toggle-btn" data-activity-type="Sitting" aria-pressed="false">Sitting</button>
+            <button type="button" class="toggle-btn" data-activity-type="Standing" aria-pressed="false">Standing</button>
+            <button type="button" class="toggle-btn" data-activity-type="Talking" aria-pressed="false">Talking</button>
+            <button type="button" class="toggle-btn" data-activity-type="Queueing" aria-pressed="false">Queueing</button>
+            <button type="button" class="toggle-btn" data-activity-type="Phone Calling" aria-pressed="false">Phone Calling</button>
+            <button type="button" class="toggle-btn" data-activity-type="Smoking" aria-pressed="false">Smoking</button>
+            <button type="button" class="toggle-btn" data-activity-type="Eating / Drinking" aria-pressed="false">Eating / Drinking</button>
+            <button type="button" class="toggle-btn" data-activity-type="Running / Exercising" aria-pressed="false">Running / Exercising</button>
+            <button type="button" class="toggle-btn" data-activity-type="Others" aria-pressed="false">Others</button>
           </div>
           <small class="field-hint">Select one or more activities.</small>
         </div>
@@ -80,8 +89,8 @@
         <div class="input-group">
           <span>Gender</span>
           <div class="gender-controls" id="genderControls">
-            <button type="button" class="gender-btn" data-gender="male" aria-pressed="false">Male</button>
-            <button type="button" class="gender-btn" data-gender="female" aria-pressed="false">Female</button>
+            <button type="button" class="toggle-btn" data-gender="male" aria-pressed="false">Male</button>
+            <button type="button" class="toggle-btn" data-gender="female" aria-pressed="false">Female</button>
           </div>
         </div>
 
@@ -89,10 +98,10 @@
           <span>Age Group</span>
           <input id="ageGroup" type="hidden">
           <div class="gender-controls age-group-controls" id="ageGroupControls" role="group" aria-label="Age group">
-            <button type="button" class="gender-btn age-group-btn" data-age-group="under-10" data-age-label="<10 years old" aria-pressed="false">&lt;10 years old</button>
-            <button type="button" class="gender-btn age-group-btn" data-age-group="10-20" data-age-label="10-20 years old" aria-pressed="false">10-20 years old</button>
-            <button type="button" class="gender-btn age-group-btn" data-age-group="20-60" data-age-label="20-60 years old" aria-pressed="false">20-60 years old</button>
-            <button type="button" class="gender-btn age-group-btn" data-age-group="over-60" data-age-label=">60 years old" aria-pressed="false">&gt;60 years old</button>
+            <button type="button" class="toggle-btn" data-age-group="under-10" data-age-label="<10 years old" aria-pressed="false">&lt;10 years old</button>
+            <button type="button" class="toggle-btn" data-age-group="10-20" data-age-label="10-20 years old" aria-pressed="false">10-20 years old</button>
+            <button type="button" class="toggle-btn" data-age-group="20-60" data-age-label="20-60 years old" aria-pressed="false">20-60 years old</button>
+            <button type="button" class="toggle-btn" data-age-group="over-60" data-age-label=">60 years old" aria-pressed="false">&gt;60 years old</button>
           </div>
         </div>
 

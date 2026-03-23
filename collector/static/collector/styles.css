@@ -324,50 +324,19 @@ textarea {
   flex-wrap: wrap;
 }
 
+.indiv-group-selection {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
 .activity-type-controls {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.5rem;
 }
 
-.gender-btn,
-.age-group-btn {
-  background: #fff;
-  border: 1px solid var(--line);
-  color: var(--text);
-  padding: 0.42rem 0.75rem;
-  white-space: nowrap;
-}
-
-.activity-type-btn {
-  width: 100%;
-  min-height: 3rem;
-  white-space: normal;
-  line-height: 1.2;
-  text-align: center;
-}
-
-.gender-btn:hover,
-.age-group-btn:hover {
-  background: #f3f7ff;
-  border-color: #b8cae8;
-  color: var(--text);
-}
-
-.gender-btn.active,
-.age-group-btn.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.gender-btn.active:hover,
-.age-group-btn.active:hover {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-  color: #fff;
-}
-
+/* Base button class */
 button {
   padding: 0.52rem 0.85rem;
   border-radius: 8px;
@@ -381,28 +350,49 @@ button:hover {
   background: var(--accent-strong);
 }
 
-button.gender-btn.active,
-button.gender-btn[aria-pressed="true"],
-button.age-group-btn.active,
-button.age-group-btn[aria-pressed="true"] {
+/* Secondary button class */
+button.secondary {
+  background: #fff;
+  border-color: var(--line);
+  color: var(--text);
+}
+
+/* Toggle button class */
+.toggle-btn {
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 0.42rem 0.75rem;
+  white-space: nowrap;
+}
+
+.toggle-btn:hover {
+  background: #f3f7ff;
+  border-color: #b8cae8;
+  color: var(--text);
+}
+
+button.toggle-btn.active,
+button.toggle-btn[aria-pressed="true"] {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
 }
 
-button.gender-btn.active:hover,
-button.gender-btn[aria-pressed="true"]:hover,
-button.age-group-btn.active:hover,
-button.age-group-btn[aria-pressed="true"]:hover {
+button.toggle-btn.active:hover,
+button.toggle-btn[aria-pressed="true"]:hover {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
   color: #fff;
 }
 
-button.secondary {
-  background: #fff;
-  border-color: var(--line);
-  color: var(--text);
+/* Indiv-Group button variant */
+.indivgrp-btn {
+  width: 100%;
+  min-height: 3rem;
+  white-space: normal;
+  line-height: 1.2;
+  text-align: center;
 }
 
 .records-panel {
