@@ -27,6 +27,8 @@ const ACTIVITY_TYPE_OPTIONS = [
   "Queueing",
   "Phone Calling",
   "Smoking",
+  "Eating / Drinking",
+  "Running / Exercising",
   "Others",
 ];
 const ACTIVITY_TYPE_ALIASES = {
@@ -71,9 +73,16 @@ const zoomOutBtn = document.getElementById("zoomOutBtn");
 const zoomInBtn = document.getElementById("zoomInBtn");
 const zoomResetBtn = document.getElementById("zoomResetBtn");
 const zoomValue = document.getElementById("zoomValue");
-const activityTypeButtons = Array.from(document.querySelectorAll(".activity-type-btn[data-activity-type]"));
-const genderButtons = Array.from(document.querySelectorAll(".gender-btn[data-gender]"));
-const ageGroupButtons = Array.from(document.querySelectorAll(".age-group-btn[data-age-group]"));
+const activityTypeButtons = Array.from(document.querySelectorAll(".toggle-btn[data-activity-type]"));
+const genderButtons = Array.from(document.querySelectorAll(".toggle-btn[data-gender]"));
+const ageGroupButtons = Array.from(document.querySelectorAll(".toggle-btn[data-age-group]"));
+const indivGrpButtons = Array.from(document.querySelectorAll(".indivgrp-btn[data-indivgrp-type]"));
+const activityFormHeading = document.getElementById("activityFormHeading");
+const recordMode = document.getElementById("recordMode");
+const grpCounterDown = document.getElementById("grpCounterDown");
+const grpCounterUp = document.getElementById("grpCounterUp");
+const groupValue = document.getElementById("groupValue");
+const groupCounterContainer = document.getElementById("groupCounterContainer");
 const savePrompt = document.getElementById("savePrompt");
 
 let records = [];
@@ -99,6 +108,7 @@ let isLocatingViaGps = false;
 let lastZoomAnchor = null;
 let pinchStartDistance = 0;
 let pinchStartZoom = DEFAULT_MAP_ZOOM;
+let groupCount = 2;
 
 initialize().catch((error) => {
   console.error("Initialization failed:", error);
@@ -151,6 +161,13 @@ async function initialize() {
   ageGroupButtons.forEach((button) => {
     button.addEventListener("click", () => setSelectedAgeGroup(button.dataset.ageGroup || ""));
   });
+  indivGrpButtons.forEach((button) => {
+    button.addEventListener("click", () => setRecordMode(button.dataset.indivgrpType || ""));
+  });
+  if (grpCounterUp && grpCounterDown) {
+    grpCounterUp.addEventListener("click", () => changeGroupCount(1));
+    grpCounterDown.addEventListener("click", () => changeGroupCount(-1));
+  }
   if (locateViaGpsBtn) {
     locateViaGpsBtn.addEventListener("click", onLocateViaGps);
   }
@@ -160,6 +177,7 @@ async function initialize() {
   setSelectedActivityTypes([]);
   setSelectedGender("");
   setSelectedAgeGroup("");
+  setRecordMode("individual");
 
   await loadBuildingMaps();
   records = await loadRecords();
@@ -276,6 +294,15 @@ function toggleActivityType(value) {
   setSelectedActivityTypes(nextSelection);
 }
 
+function changeGroupCount(delta) {
+  groupCount += delta;
+  if (groupCount < 2) groupCount = 2;
+  if (groupValue) {
+    groupValue.textContent = groupCount;
+  }
+  return groupCount
+  }
+
 function setSelectedActivityTypes(values) {
   selectedActivityTypes = normalizeActivityTypeSelection(values);
   activityType.value = selectedActivityTypes.join(", ");
@@ -305,6 +332,22 @@ function setSelectedAgeGroup(value) {
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
+}
+
+function setRecordMode(value) {
+  const mode = value === "individual" || value === "group" ? value : "individual";
+  recordMode.value = mode;
+  indivGrpButtons.forEach((button) => {
+    const isActive = button.dataset.indivgrpType === mode;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+  const headingText = mode === "group" ? "Record Predominant Activity" : "Record Activity";
+  activityFormHeading.textContent = headingText;
+
+  if (groupCounterContainer) {
+    groupCounterContainer.style.display = mode === "group" ? "flex" : "none";
+  }
 }
 
 function initializeAutoIdsForCollection() {

@@ -33,6 +33,7 @@ ALLOWED_ACTIVITY_TYPES = (
   "Queueing",
   "Phone Calling",
   "Smoking",
+  "Eating / Drinking"
   "Others",
 )
 ACTIVITY_TYPE_ALIASES = {
