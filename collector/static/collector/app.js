@@ -344,6 +344,10 @@ function setRecordMode(value) {
   });
   const headingText = mode === "group" ? "Record Predominant Activity" : "Record Activity";
   activityFormHeading.textContent = headingText;
+
+  if (groupCounterContainer) {
+    groupCounterContainer.style.display = mode === "group" ? "flex" : "none";
+  }
 }
 
 function initializeAutoIdsForCollection() {
