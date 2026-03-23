@@ -294,6 +294,15 @@ function toggleActivityType(value) {
   setSelectedActivityTypes(nextSelection);
 }
 
+function changeGroupCount(delta) {
+  groupCount += delta;
+  if (groupCount < 2) groupCount = 2;
+  if (groupValue) {
+    groupValue.textContent = groupCount;
+  }
+  return groupCount
+  }
+
 function setSelectedActivityTypes(values) {
   selectedActivityTypes = normalizeActivityTypeSelection(values);
   activityType.value = selectedActivityTypes.join(", ");
@@ -492,15 +501,6 @@ function setMapZoom(nextZoom, options = {}) {
   const clampedZoom = clampZoom(nextZoom);
   if (!Number.isFinite(clampedZoom)) {
     return;
-  }
-
-function changeGroupCount(delta) {
-  groupCount += delta;
-  if (groupCount < 2) groupCount = 1;
-  if (groupValue) {
-    groupValue.textContent = groupCount;
-  }
-  return groupCount
   }
 
   const previousWidth = mapCanvas ? mapCanvas.clientWidth : 0;
