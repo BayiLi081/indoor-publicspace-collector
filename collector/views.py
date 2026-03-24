@@ -7,7 +7,7 @@ from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import DatabaseError
+from django.db import DatabaseError, transaction
 from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
@@ -33,7 +33,8 @@ ALLOWED_ACTIVITY_TYPES = (
   "Queueing",
   "Phone Calling",
   "Smoking",
-  "Eating / Drinking"
+  "Eating / Drinking",
+  "Running / Exercising",
   "Others",
 )
 ACTIVITY_TYPE_ALIASES = {
@@ -57,7 +58,12 @@ MAP_EXTENSION_PRIORITY = {
 
 @ensure_csrf_cookie
 def index(request: HttpRequest) -> HttpResponse:
-  return render(request, "collector/index.html")
+  return render(request, "collector/index.html", {"active_page": "capture"})
+
+
+@ensure_csrf_cookie
+def management(request: HttpRequest) -> HttpResponse:
+  return render(request, "collector/management.html", {"active_page": "management"})
 
 
 @require_http_methods(["GET"])
@@ -132,13 +138,34 @@ def api_records(request: HttpRequest) -> JsonResponse:
     return error_response
 
   try:
-    record = build_record_from_payload(payload)
-    record.full_clean()
-    record.save()
+    batch_payload = payload.get("records")
+    if batch_payload is not None:
+      if not isinstance(batch_payload, list) or not batch_payload:
+        raise ValidationError({"records": ["Provide at least one record payload."]})
+
+      records = []
+      for item in batch_payload:
+        if not isinstance(item, dict):
+          raise ValidationError({"records": ["Each record payload must be an object."]})
+
+        record = build_record_from_payload(item)
+        record.full_clean()
+        records.append(record)
+
+      with transaction.atomic():
+        for record in records:
+          record.save()
+    else:
+      record = build_record_from_payload(payload)
+      record.full_clean()
+      record.save()
   except DatabaseError as exc:
     return database_error_response(exc)
   except ValidationError as exc:
     return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
+
+  if batch_payload is not None:
+    return JsonResponse({"records": [serialize_record(record) for record in records]}, status=201)
 
   return JsonResponse({"record": serialize_record(record)}, status=201)
 

@@ -50,6 +50,7 @@ const LEGACY_BUILDING_MAPS = {
 const mapWrap = document.getElementById("mapWrap");
 const mapCanvas = document.getElementById("mapCanvas");
 const mapImage = document.getElementById("mapImage");
+const mapPanel = document.querySelector(".map-panel");
 const buildingSelect = document.getElementById("buildingSelect");
 const floorSelect = document.getElementById("floorSelect");
 const activityForm = document.getElementById("activityForm");
@@ -65,7 +66,9 @@ const recordsTbody = document.getElementById("recordsTbody");
 const searchInput = document.getElementById("searchInput");
 const exportBtn = document.getElementById("exportBtn");
 const resetFormBtn = document.getElementById("resetFormBtn");
+const saveRecordBtn = document.getElementById("saveRecordBtn");
 const collectToggleBtn = document.getElementById("collectToggleBtn");
+const collectControls = collectToggleBtn ? collectToggleBtn.closest(".collect-controls") : null;
 const collectStatus = document.getElementById("collectStatus");
 const locateViaGpsBtn = document.getElementById("locateViaGpsBtn");
 const locateStatus = document.getElementById("locateStatus");
@@ -83,11 +86,26 @@ const grpCounterDown = document.getElementById("grpCounterDown");
 const grpCounterUp = document.getElementById("grpCounterUp");
 const groupValue = document.getElementById("groupValue");
 const groupCounterContainer = document.getElementById("groupCounterContainer");
+const individualDetailFields = document.getElementById("individualDetailFields");
+const groupDetailsPanel = document.getElementById("groupDetailsPanel");
+const groupDetailsHint = document.getElementById("groupDetailsHint");
+const groupPersonList = document.getElementById("groupPersonList");
 const savePrompt = document.getElementById("savePrompt");
+const groupPointModal = document.getElementById("groupPointModal");
+const groupPointForm = document.getElementById("groupPointForm");
+const groupPointModalTitle = document.getElementById("groupPointModalTitle");
+const groupPointModalCoords = document.getElementById("groupPointModalCoords");
+const groupPointModalPrompt = document.getElementById("groupPointModalPrompt");
+const groupPointCancelBtn = document.getElementById("groupPointCancelBtn");
+const groupPointRemoveBtn = document.getElementById("groupPointRemoveBtn");
+const groupPointSaveBtn = document.getElementById("groupPointSaveBtn");
+const groupPointActivityButtons = Array.from(document.querySelectorAll(".group-point-activity-btn"));
+const groupPointGenderButtons = Array.from(document.querySelectorAll(".group-point-gender-btn"));
+const groupPointAgeButtons = Array.from(document.querySelectorAll(".group-point-age-btn"));
 
 let records = [];
-let selectedPoint = null;
-let selectedPointTimestampIso = "";
+let selectedPoints = [];
+let draftGroupPoint = null;
 let selectedActivityTypes = [];
 let selectedGender = "";
 let selectedPhotoLocation = null;
@@ -109,6 +127,10 @@ let lastZoomAnchor = null;
 let pinchStartDistance = 0;
 let pinchStartZoom = DEFAULT_MAP_ZOOM;
 let groupCount = 2;
+let groupPointModalState = null;
+let groupPointSelectedActivityTypes = [];
+let groupPointSelectedGender = "";
+let groupPointSelectedAgeGroup = "";
 
 initialize().catch((error) => {
   console.error("Initialization failed:", error);
@@ -143,10 +165,16 @@ async function initialize() {
   });
   photoInput.addEventListener("change", onPhotoChange);
   activityForm.addEventListener("submit", onFormSubmit);
-  searchInput.addEventListener("input", renderRecords);
-  exportBtn.addEventListener("click", onExport);
+  if (searchInput) {
+    searchInput.addEventListener("input", renderRecords);
+  }
+  if (exportBtn) {
+    exportBtn.addEventListener("click", onExport);
+  }
   resetFormBtn.addEventListener("click", () => resetForm(true, false));
-  collectToggleBtn.addEventListener("click", onCollectToggle);
+  if (collectToggleBtn) {
+    collectToggleBtn.addEventListener("click", onCollectToggle);
+  }
   if (zoomOutBtn && zoomInBtn && zoomResetBtn) {
     zoomOutBtn.addEventListener("click", () => changeMapZoom(-MAP_ZOOM_STEP));
     zoomInBtn.addEventListener("click", () => changeMapZoom(MAP_ZOOM_STEP));
@@ -162,7 +190,7 @@ async function initialize() {
     button.addEventListener("click", () => setSelectedAgeGroup(button.dataset.ageGroup || ""));
   });
   indivGrpButtons.forEach((button) => {
-    button.addEventListener("click", () => setRecordMode(button.dataset.indivgrpType || ""));
+    button.addEventListener("click", () => activateCaptureMode(button.dataset.indivgrpType || ""));
   });
   if (grpCounterUp && grpCounterDown) {
     grpCounterUp.addEventListener("click", () => changeGroupCount(1));
@@ -171,13 +199,35 @@ async function initialize() {
   if (locateViaGpsBtn) {
     locateViaGpsBtn.addEventListener("click", onLocateViaGps);
   }
+  if (groupPointForm) {
+    groupPointForm.addEventListener("submit", onGroupPointFormSubmit);
+  }
+  if (groupPointCancelBtn) {
+    groupPointCancelBtn.addEventListener("click", onGroupPointCancel);
+  }
+  if (groupPointRemoveBtn) {
+    groupPointRemoveBtn.addEventListener("click", onGroupPointRemove);
+  }
+  if (groupPointModal) {
+    groupPointModal.addEventListener("click", onGroupPointModalClick);
+  }
+  groupPointActivityButtons.forEach((button) => {
+    button.addEventListener("click", () => toggleGroupPointActivityType(button.dataset.groupPointActivityType || ""));
+  });
+  groupPointGenderButtons.forEach((button) => {
+    button.addEventListener("click", () => setGroupPointSelectedGender(button.dataset.groupPointGender || ""));
+  });
+  groupPointAgeButtons.forEach((button) => {
+    button.addEventListener("click", () => setGroupPointSelectedAgeGroup(button.dataset.groupPointAgeLabel || ""));
+  });
+  document.addEventListener("keydown", onDocumentKeyDown);
   setMapZoom(DEFAULT_MAP_ZOOM, { preserveCenter: false });
 
   setCollectionActive(false);
   setSelectedActivityTypes([]);
   setSelectedGender("");
   setSelectedAgeGroup("");
-  setRecordMode("individual");
+  setRecordMode("");
 
   await loadBuildingMaps();
   records = await loadRecords();
@@ -246,40 +296,79 @@ function onFloorChange(event) {
 }
 
 function onCollectToggle() {
-  if (isCollecting) {
-    finishCollection();
+  if (!isCollecting) {
     return;
   }
-  startCollection();
+  finishCollection();
 }
 
-function startCollection() {
+function activateCaptureMode(value) {
+  const mode = normalizeRecordMode(value);
+  if (!mode) {
+    return;
+  }
+
+  if (isCollecting && recordMode.value === mode && currentClusterNumber) {
+    setCollectStatus(getCollectionActivatedMessage(mode), "active");
+    return;
+  }
+
+  setRecordMode(mode);
   initializeAutoIdsForCollection();
   setCollectionActive(true);
-  clearTemporarySelection();
-  setCollectStatus(
-    `Collecting started for ${getCurrentClusterIdLabel()}. Tap one person on the map, fill form, and save.`,
-    "active"
-  );
+  resetForm(true, false);
+  setSavePrompt("", "muted");
+  setCollectStatus(getCollectionActivatedMessage(mode), "active");
 }
 
-function finishCollection() {
+function finishCollection(message = "Capture ended. Select Individual or Group to begin again.") {
   setCollectionActive(false);
-  clearTemporarySelection();
   clearAutoIdsForCollection();
-  setCollectStatus("Collection ended. Click Start to begin a new cluster.", "muted");
+  resetForm(true, false);
+  setRecordMode("");
+  setCollectStatus(message, "muted");
 }
 
 function setCollectionActive(active) {
   isCollecting = !!active;
-  collectToggleBtn.textContent = isCollecting ? "End" : "Start";
+  if (mapPanel) {
+    mapPanel.classList.toggle("capture-active", isCollecting);
+  }
+  if (!collectToggleBtn) {
+    return;
+  }
+
+  collectToggleBtn.textContent = "End Capture";
   collectToggleBtn.classList.toggle("active", isCollecting);
   collectToggleBtn.setAttribute("aria-pressed", isCollecting ? "true" : "false");
+  collectToggleBtn.disabled = !isCollecting;
+  if (collectControls) {
+    collectControls.hidden = !isCollecting;
+  } else {
+    collectToggleBtn.hidden = !isCollecting;
+  }
 }
 
 function setCollectStatus(message, state = "muted") {
   collectStatus.textContent = message;
   collectStatus.dataset.state = state;
+}
+
+function normalizeRecordMode(value) {
+  return value === "individual" || value === "group" ? value : "";
+}
+
+function isGroupMode() {
+  return recordMode.value === "group";
+}
+
+function getCollectionActivatedMessage(mode) {
+  const clusterLabel = getCurrentClusterIdLabel();
+  if (mode === "group") {
+    return `Group capture active for ${clusterLabel}. Tap a map point to open the member details popup. Save the group form after all ${groupCount} members are entered.`;
+  }
+
+  return `Individual capture active for ${clusterLabel}. Tap one person on the map, fill the form, and save to finish.`;
 }
 
 function toggleActivityType(value) {
@@ -296,12 +385,29 @@ function toggleActivityType(value) {
 
 function changeGroupCount(delta) {
   groupCount += delta;
-  if (groupCount < 2) groupCount = 2;
+  if (groupCount < 2) {
+    groupCount = 2;
+  }
+  if (selectedPoints.length > groupCount) {
+    selectedPoints = selectedPoints.slice(0, groupCount);
+  }
+  if (
+    draftGroupPoint && selectedPoints.length >= groupCount ||
+    (groupPointModalState && Number.isInteger(groupPointModalState.index) && groupPointModalState.index >= groupCount)
+  ) {
+    closeGroupPointModal({ discardDraft: true, keepStatus: true });
+  }
   if (groupValue) {
     groupValue.textContent = groupCount;
   }
-  return groupCount
+  updateSelectedCoordsText();
+  if (isCollecting && isGroupMode()) {
+    setCollectStatus(getGroupCaptureProgressMessage(), "active");
+    renderMarkers();
   }
+  renderGroupPersonList();
+  return groupCount;
+}
 
 function setSelectedActivityTypes(values) {
   selectedActivityTypes = normalizeActivityTypeSelection(values);
@@ -335,19 +441,238 @@ function setSelectedAgeGroup(value) {
 }
 
 function setRecordMode(value) {
-  const mode = value === "individual" || value === "group" ? value : "individual";
+  const mode = normalizeRecordMode(value);
   recordMode.value = mode;
   indivGrpButtons.forEach((button) => {
     const isActive = button.dataset.indivgrpType === mode;
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
   });
-  const headingText = mode === "group" ? "Record Predominant Activity" : "Record Activity";
+  const headingText = mode === "group" ? "Record Group" : "Record Activity";
   activityFormHeading.textContent = headingText;
 
   if (groupCounterContainer) {
     groupCounterContainer.style.display = mode === "group" ? "flex" : "none";
   }
+  if (individualDetailFields) {
+    individualDetailFields.hidden = mode === "group";
+  }
+  if (groupDetailsPanel) {
+    groupDetailsPanel.hidden = mode !== "group";
+  }
+  if (saveRecordBtn) {
+    saveRecordBtn.textContent = mode === "group" ? "Save Group" : "Save Record";
+  }
+  if (mode !== "group") {
+    closeGroupPointModal({ discardDraft: true, keepStatus: true });
+  }
+  renderGroupPersonList();
+}
+
+function updateSelectedCoordsText() {
+  if (!selectedPoints.length) {
+    selectedCoords.textContent = "None";
+    return;
+  }
+
+  if (!isGroupMode() && selectedPoints.length === 1) {
+    const [point] = selectedPoints;
+    selectedCoords.textContent = `${point.xPct}%, ${point.yPct}%`;
+    return;
+  }
+
+  const latestPoint = selectedPoints[selectedPoints.length - 1];
+  selectedCoords.textContent = `${selectedPoints.length} of ${groupCount} members saved. Latest: ${latestPoint.xPct}%, ${latestPoint.yPct}%`;
+}
+
+function getGroupCaptureProgressMessage() {
+  const clusterLabel = getCurrentClusterIdLabel();
+  if (isGroupPointModalOpen()) {
+    return `Group capture active for ${clusterLabel}. Complete the member popup before selecting another point.`;
+  }
+  if (!selectedPoints.length) {
+    return `Group capture active for ${clusterLabel}. Tap a point on the map to enter member 1 of ${groupCount}.`;
+  }
+
+  if (selectedPoints.length < groupCount) {
+    return `Group capture active for ${clusterLabel}. ${selectedPoints.length} of ${groupCount} members saved. Tap the map to add the next member.`;
+  }
+
+  return `Group capture active for ${clusterLabel}. All ${groupCount} members are ready. Save the group form to finish.`;
+}
+
+function isGroupPointModalOpen() {
+  return !!groupPointModalState;
+}
+
+function isCompleteGroupPoint(point) {
+  return (
+    !!point &&
+    Array.isArray(point.activityTypes) &&
+    point.activityTypes.length > 0 &&
+    (point.gender === "male" || point.gender === "female") &&
+    typeof point.ageGroup === "string" &&
+    point.ageGroup.trim().length > 0
+  );
+}
+
+function toggleGroupPointActivityType(value) {
+  const normalized = normalizeActivityTypeLabel(value);
+  if (!normalized) {
+    return;
+  }
+
+  const nextSelection = groupPointSelectedActivityTypes.includes(normalized)
+    ? groupPointSelectedActivityTypes.filter((item) => item !== normalized)
+    : [...groupPointSelectedActivityTypes, normalized];
+  setGroupPointSelectedActivityTypes(nextSelection);
+}
+
+function setGroupPointSelectedActivityTypes(values) {
+  groupPointSelectedActivityTypes = normalizeActivityTypeSelection(values);
+  groupPointActivityButtons.forEach((button) => {
+    const activity = normalizeActivityTypeLabel(button.dataset.groupPointActivityType || "");
+    const isActive = groupPointSelectedActivityTypes.includes(activity);
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function setGroupPointSelectedGender(value) {
+  groupPointSelectedGender = value === "male" || value === "female" ? value : "";
+  groupPointGenderButtons.forEach((button) => {
+    const isActive = button.dataset.groupPointGender === groupPointSelectedGender;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function setGroupPointSelectedAgeGroup(value) {
+  groupPointSelectedAgeGroup = typeof value === "string" ? value.trim() : "";
+  groupPointAgeButtons.forEach((button) => {
+    const isActive = (button.dataset.groupPointAgeLabel || "").trim() === groupPointSelectedAgeGroup;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function openGroupPointModal(point, index = null) {
+  if (!groupPointModal || !groupPointForm || !point) {
+    return;
+  }
+
+  groupPointModalState = { index };
+  const pointNumber = index === null ? selectedPoints.length + 1 : index + 1;
+  const isEditing = index !== null;
+  const pointDetails = isEditing ? selectedPoints[index] : point;
+
+  if (groupPointModalTitle) {
+    groupPointModalTitle.textContent = isEditing
+      ? `Edit Member ${pointNumber}`
+      : `Member ${pointNumber} Details`;
+  }
+  if (groupPointModalCoords) {
+    groupPointModalCoords.textContent = `Point ${point.xPct}%, ${point.yPct}%`;
+  }
+  if (groupPointRemoveBtn) {
+    groupPointRemoveBtn.hidden = !isEditing;
+  }
+  if (groupPointSaveBtn) {
+    groupPointSaveBtn.textContent = isEditing ? "Update Member" : "Save Member";
+  }
+
+  setGroupPointSelectedActivityTypes(pointDetails.activityTypes || []);
+  setGroupPointSelectedGender(pointDetails.gender || "");
+  setGroupPointSelectedAgeGroup(pointDetails.ageGroup || "");
+  setSavePrompt("", "muted");
+  setGroupPointModalPrompt("", "muted");
+
+  groupPointModal.hidden = false;
+  groupPointModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+}
+
+function closeGroupPointModal({ discardDraft = false, keepStatus = false } = {}) {
+  if (!groupPointModal) {
+    return;
+  }
+
+  if (discardDraft) {
+    draftGroupPoint = null;
+  }
+  groupPointModal.hidden = true;
+  groupPointModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+  groupPointModalState = null;
+  setGroupPointSelectedActivityTypes([]);
+  setGroupPointSelectedGender("");
+  setGroupPointSelectedAgeGroup("");
+  setGroupPointModalPrompt("", "muted");
+  if (!keepStatus && isCollecting && isGroupMode()) {
+    setCollectStatus(getGroupCaptureProgressMessage(), "active");
+  }
+  renderMarkers();
+}
+
+function setGroupPointModalPrompt(message, state = "muted") {
+  if (!groupPointModalPrompt) {
+    return;
+  }
+  groupPointModalPrompt.textContent = message;
+  groupPointModalPrompt.dataset.state = state;
+}
+
+function renderGroupPersonList() {
+  if (!groupDetailsPanel || !groupPersonList || !groupDetailsHint) {
+    return;
+  }
+
+  if (!isGroupMode()) {
+    groupPersonList.innerHTML = "";
+    groupDetailsHint.textContent = "Tap a point on the map to open the member details popup.";
+    return;
+  }
+
+  if (isGroupPointModalOpen()) {
+    groupDetailsHint.textContent = `Complete the popup for member ${selectedPoints.length + 1} of ${groupCount}.`;
+  } else if (selectedPoints.length < groupCount) {
+    groupDetailsHint.textContent = `Saved ${selectedPoints.length} of ${groupCount} members. Tap the map to add the next member.`;
+  } else {
+    groupDetailsHint.textContent = `All ${groupCount} members are ready. You can now save the group form.`;
+  }
+
+  if (!selectedPoints.length) {
+    groupPersonList.innerHTML = `<p class="group-person-empty">No group members saved yet.</p>`;
+    return;
+  }
+
+  groupPersonList.innerHTML = selectedPoints
+    .map((point, index) => {
+      const activityText = formatActivityType(point.activityTypes);
+      const genderText = formatGender(point.gender);
+      const ageText = formatAgeGroup(point.ageGroup);
+      return `
+        <article class="group-person-card">
+          <div class="group-person-copy">
+            <strong>Member ${index + 1}</strong>
+            <span>${escapeHtml(point.xPct)}%, ${escapeHtml(point.yPct)}%</span>
+            <span>${escapeHtml(activityText)} | ${escapeHtml(genderText)} | ${escapeHtml(ageText)}</span>
+          </div>
+          <div class="group-person-actions">
+            <button type="button" class="secondary" data-group-edit-index="${index}">Edit</button>
+            <button type="button" class="secondary" data-group-remove-index="${index}">Remove</button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+
+  groupPersonList.querySelectorAll("[data-group-edit-index]").forEach((button) => {
+    button.addEventListener("click", () => onGroupPointEdit(Number.parseInt(button.dataset.groupEditIndex || "-1", 10)));
+  });
+  groupPersonList.querySelectorAll("[data-group-remove-index]").forEach((button) => {
+    button.addEventListener("click", () => removeGroupPoint(Number.parseInt(button.dataset.groupRemoveIndex || "-1", 10)));
+  });
 }
 
 function initializeAutoIdsForCollection() {
@@ -659,7 +984,11 @@ function clampScrollValue(value) {
 function onMapClick(event) {
   if (event.target !== mapImage) return;
   if (!isCollecting) {
-    setCollectStatus("Click Start before selecting map points.", "warn");
+    setCollectStatus("Select Individual or Group before selecting map points.", "warn");
+    return;
+  }
+  if (isGroupMode() && isGroupPointModalOpen()) {
+    setCollectStatus("Finish the open member popup before selecting another point.", "warn");
     return;
   }
 
@@ -669,17 +998,139 @@ function onMapClick(event) {
   const xPct = (xPx / rect.width) * 100;
   const yPct = (yPx / rect.height) * 100;
 
-  selectedPoint = {
+  if (isGroupMode() && selectedPoints.length >= groupCount) {
+    setCollectStatus(`Group already has ${groupCount} saved members. Save the group or remove one to continue.`, "warn");
+    return;
+  }
+
+  const clickTime = new Date();
+  const selectedPoint = {
     xPct: round2(xPct),
     yPct: round2(yPct),
     xPx: Math.round(xPx),
     yPx: Math.round(yPx),
+    timestampIso: clickTime.toISOString(),
   };
-  const clickTime = new Date();
-  selectedPointTimestampIso = clickTime.toISOString();
   activityTime.value = toDateTimeLocalValue(clickTime);
 
-  selectedCoords.textContent = `${selectedPoint.xPct}%, ${selectedPoint.yPct}%`;
+  if (isGroupMode()) {
+    draftGroupPoint = selectedPoint;
+    openGroupPointModal(selectedPoint);
+    setCollectStatus(`Group capture active for ${getCurrentClusterIdLabel()}. Complete member ${selectedPoints.length + 1} in the popup.`, "active");
+  } else {
+    selectedPoints = [selectedPoint];
+    setCollectStatus(`Individual point selected for ${getCurrentClusterIdLabel()}. Save record to finish.`, "active");
+  }
+
+  updateSelectedCoordsText();
+  renderGroupPersonList();
+  renderMarkers();
+}
+
+function onGroupPointModalClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (target.hasAttribute("data-group-point-close")) {
+    onGroupPointCancel();
+  }
+}
+
+function onDocumentKeyDown(event) {
+  if (event.key === "Escape" && isGroupPointModalOpen()) {
+    onGroupPointCancel();
+  }
+}
+
+function onGroupPointCancel() {
+  const isEditing = groupPointModalState && Number.isInteger(groupPointModalState.index);
+  closeGroupPointModal({ discardDraft: !isEditing });
+  renderGroupPersonList();
+}
+
+function onGroupPointRemove() {
+  if (!groupPointModalState || !Number.isInteger(groupPointModalState.index)) {
+    closeGroupPointModal({ discardDraft: true });
+    renderGroupPersonList();
+    return;
+  }
+
+  removeGroupPoint(groupPointModalState.index);
+}
+
+function onGroupPointEdit(index) {
+  if (!Number.isInteger(index) || index < 0 || index >= selectedPoints.length) {
+    return;
+  }
+  draftGroupPoint = null;
+  openGroupPointModal(selectedPoints[index], index);
+  setCollectStatus(`Editing group member ${index + 1} for ${getCurrentClusterIdLabel()}.`, "active");
+  renderMarkers();
+}
+
+function removeGroupPoint(index) {
+  if (!Number.isInteger(index) || index < 0 || index >= selectedPoints.length) {
+    return;
+  }
+
+  selectedPoints = selectedPoints.filter((_, itemIndex) => itemIndex !== index);
+  closeGroupPointModal({ discardDraft: true, keepStatus: true });
+  updateSelectedCoordsText();
+  renderGroupPersonList();
+  if (isCollecting && isGroupMode()) {
+    setCollectStatus(getGroupCaptureProgressMessage(), "active");
+  }
+  renderMarkers();
+}
+
+function onGroupPointFormSubmit(event) {
+  event.preventDefault();
+
+  if (!groupPointModalState) {
+    return;
+  }
+
+  if (!groupPointSelectedActivityTypes.length) {
+    setGroupPointModalPrompt("Select at least one activity type.", "error");
+    return;
+  }
+  if (!groupPointSelectedGender) {
+    setGroupPointModalPrompt("Select gender.", "error");
+    return;
+  }
+  if (!groupPointSelectedAgeGroup) {
+    setGroupPointModalPrompt("Select an age group.", "error");
+    return;
+  }
+
+  const isEditing = Number.isInteger(groupPointModalState.index);
+  const index = isEditing ? groupPointModalState.index : -1;
+  const sourcePoint = isEditing ? selectedPoints[index] : draftGroupPoint;
+  if (!sourcePoint) {
+    setGroupPointModalPrompt("Selected point is unavailable. Tap the map again.", "error");
+    return;
+  }
+
+  const completedPoint = {
+    ...sourcePoint,
+    activityTypes: [...groupPointSelectedActivityTypes],
+    gender: groupPointSelectedGender,
+    ageGroup: groupPointSelectedAgeGroup,
+  };
+
+  if (isEditing) {
+    selectedPoints = selectedPoints.map((point, pointIndex) => (pointIndex === index ? completedPoint : point));
+  } else {
+    selectedPoints = [...selectedPoints, completedPoint];
+    draftGroupPoint = null;
+  }
+
+  closeGroupPointModal({ keepStatus: true });
+  updateSelectedCoordsText();
+  renderGroupPersonList();
+  setCollectStatus(getGroupCaptureProgressMessage(), "active");
   renderMarkers();
 }
 
@@ -797,7 +1248,7 @@ async function onFormSubmit(event) {
   event.preventDefault();
 
   if (!isCollecting) {
-    alert("Click Start before saving records.");
+    alert("Select Individual or Group before saving records.");
     return;
   }
 
@@ -811,29 +1262,54 @@ async function onFormSubmit(event) {
     return;
   }
 
-  if (!selectedPoint) {
-    alert("Please click a person location on the map before saving.");
+  if (!selectedPoints.length) {
+    alert("Please click point(s) on the map before saving.");
     return;
   }
 
-  if (!selectedGender) {
-    alert("Please select gender (male or female).");
-    return;
+  const activeMode = recordMode.value;
+  if (activeMode !== "group") {
+    if (!selectedGender) {
+      alert("Please select gender (male or female).");
+      return;
+    }
+
+    if (!selectedActivityTypes.length) {
+      alert("Please select at least one activity type.");
+      return;
+    }
+
+    if (!ageGroup.value.trim()) {
+      alert("Please select an age group.");
+      return;
+    }
   }
 
-  if (!selectedActivityTypes.length) {
-    alert("Please select at least one activity type.");
+  const requiredPointCount = activeMode === "group" ? groupCount : 1;
+  if (selectedPoints.length !== requiredPointCount) {
+    alert(
+      `Please complete ${requiredPointCount} point${requiredPointCount === 1 ? "" : "s"} before saving the ${
+        activeMode === "group" ? "group" : "record"
+      }.`
+    );
     return;
   }
-
-  if (!ageGroup.value.trim()) {
-    alert("Please select an age group.");
+  if (activeMode === "group" && isGroupPointModalOpen()) {
+    alert("Please save or cancel the open member popup before saving the group.");
+    return;
+  }
+  if (activeMode === "group" && selectedPoints.some((point) => !isCompleteGroupPoint(point))) {
+    alert("Each group member needs activity type, gender, and age group before you can save the group.");
     return;
   }
 
   const autoActorId = actorId.value.trim();
-  if (!autoActorId) {
-    alert("Auto ID is unavailable. Click End and Start collection again.");
+  if (activeMode === "individual" && !autoActorId) {
+    alert("Auto ID is unavailable. Select Individual again.");
+    return;
+  }
+  if (activeMode === "group" && !currentClusterNumber) {
+    alert("Group capture is unavailable. Select Group again.");
     return;
   }
 
@@ -841,49 +1317,83 @@ async function onFormSubmit(event) {
   const fallbackActivityTime = Number.isNaN(parsedActivityTime.getTime())
     ? new Date().toISOString()
     : parsedActivityTime.toISOString();
-  const safeActivityTime =
-    selectedPoint && selectedPointTimestampIso ? selectedPointTimestampIso : fallbackActivityTime;
-
-  const payload = {
-    buildingId: currentBuildingId,
-    floorId: currentFloorId,
-    activityType: activityType.value.trim(),
-    actorId: autoActorId,
-    gender: selectedGender,
-    ageGroup: ageGroup.value.trim(),
-    activityTime: safeActivityTime,
-    notes: notes.value.trim(),
-    location: selectedPoint ? { xPct: selectedPoint.xPct, yPct: selectedPoint.yPct } : null,
-    photoName: selectedPhotoName || null,
-    photoPreview: selectedPhotoPreviewDataUrl || null,
-    photoLocation: selectedPhotoLocation ? { ...selectedPhotoLocation } : null,
-  };
 
   try {
-    const response = await apiRequest(API_RECORDS, {
-      method: "POST",
-      body: payload,
-    });
+    if (activeMode === "group") {
+      const payloads = selectedPoints.map((point, index) =>
+        buildRecordPayload(point, buildAutoActorId(currentClusterNumber, index + 1), fallbackActivityTime, {
+          activityTypes: point.activityTypes,
+          gender: point.gender,
+          ageGroup: point.ageGroup,
+        })
+      );
+      const response = await apiRequest(API_RECORDS, {
+        method: "POST",
+        body: { records: payloads },
+      });
 
-    if (!response.ok) {
-      throw new Error(await parseApiError(response));
-    }
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
 
-    const data = await response.json();
-    const createdRecord = normalizeRecord(data.record);
-    if (createdRecord) {
+      const data = await response.json();
+      const createdRecords = Array.isArray(data.records)
+        ? data.records.map((record) => normalizeRecord(record)).filter((record) => record !== null)
+        : [];
+      if (!createdRecords.length) {
+        throw new Error("Server did not return the created group records.");
+      }
+
+      records.push(...createdRecords);
+      setSavePrompt(`Saved ${createdRecords.length} group records successfully.`, "success");
+      finishCollection(`Group saved with ${createdRecords.length} records. Select Individual or Group for the next capture.`);
+    } else {
+      const response = await apiRequest(API_RECORDS, {
+        method: "POST",
+        body: buildRecordPayload(selectedPoints[0], autoActorId, fallbackActivityTime),
+      });
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      const data = await response.json();
+      const createdRecord = normalizeRecord(data.record);
+      if (!createdRecord) {
+        throw new Error("Server did not return the created record.");
+      }
+
       records.push(createdRecord);
+      setSavePrompt(`Saved ${autoActorId} successfully.`, "success");
+      finishCollection("Individual record saved. Select Individual or Group for the next capture.");
     }
-
-    resetForm(false, true);
-    setSavePrompt(`Saved ${autoActorId} successfully.`, "success");
-    setCollectStatus("Record saved. Click next person point or End to finish.", "active");
     renderMarkers();
     renderRecords();
   } catch (error) {
     setSavePrompt(`Could not save record: ${error.message}`, "error");
     alert(`Could not save record: ${error.message}`);
   }
+}
+
+function buildRecordPayload(point, actorIdValue, fallbackActivityTime, overrides = {}) {
+  const safeActivityTime = point?.timestampIso || fallbackActivityTime;
+  const nextActivityTypes = normalizeActivityTypeSelection(overrides.activityTypes ?? selectedActivityTypes);
+  const nextGender = overrides.gender ?? selectedGender;
+  const nextAgeGroup = typeof overrides.ageGroup === "string" ? overrides.ageGroup.trim() : ageGroup.value.trim();
+  return {
+    buildingId: currentBuildingId,
+    floorId: currentFloorId,
+    activityType: nextActivityTypes.join(", "),
+    actorId: actorIdValue,
+    gender: nextGender,
+    ageGroup: nextAgeGroup,
+    activityTime: safeActivityTime,
+    notes: notes.value.trim(),
+    location: point ? { xPct: point.xPct, yPct: point.yPct } : null,
+    photoName: selectedPhotoName || null,
+    photoPreview: selectedPhotoPreviewDataUrl || null,
+    photoLocation: selectedPhotoLocation ? { ...selectedPhotoLocation } : null,
+  };
 }
 
 async function onExport() {
@@ -920,12 +1430,13 @@ function getDownloadFilename(contentDispositionHeader) {
 
 function resetForm(resetDateTime = true, advanceActorId = false) {
   const previousActorId = actorId.value;
+  const previousRecordMode = recordMode.value;
   activityForm.reset();
   if (resetDateTime) {
     activityTime.value = toDateTimeLocalValue(new Date());
   }
-  selectedPoint = null;
-  selectedPointTimestampIso = "";
+  selectedPoints = [];
+  draftGroupPoint = null;
   setSelectedActivityTypes([]);
   setSelectedGender("");
   setSelectedAgeGroup("");
@@ -934,7 +1445,6 @@ function resetForm(resetDateTime = true, advanceActorId = false) {
   selectedPhotoPreviewDataUrl = "";
   isPhotoLocationLoading = false;
   photoInput.value = "";
-  selectedCoords.textContent = "None";
   setPhotoLocationStatus("No image selected.", "muted");
   if (isCollecting && currentClusterNumber) {
     if (advanceActorId) {
@@ -947,13 +1457,18 @@ function resetForm(resetDateTime = true, advanceActorId = false) {
   } else {
     actorId.value = "";
   }
+  closeGroupPointModal({ discardDraft: true, keepStatus: true });
+  setRecordMode(previousRecordMode);
+  updateSelectedCoordsText();
   renderMarkers();
 }
 
 function clearTemporarySelection() {
-  selectedPoint = null;
-  selectedPointTimestampIso = "";
-  selectedCoords.textContent = "None";
+  selectedPoints = [];
+  draftGroupPoint = null;
+  closeGroupPointModal({ discardDraft: true, keepStatus: true });
+  updateSelectedCoordsText();
+  renderGroupPersonList();
   renderMarkers();
 }
 
@@ -996,9 +1511,16 @@ function renderMarkers() {
     createMarker(record.location.xPct, record.location.yPct, false);
   });
 
-  if (selectedPoint) {
+  if (selectedPoints.length || draftGroupPoint) {
     drawSelectedPointClusterLink(visibleRecords);
-    createMarker(selectedPoint.xPct, selectedPoint.yPct, true);
+  }
+  if (selectedPoints.length) {
+    selectedPoints.forEach((point) => {
+      createMarker(point.xPct, point.yPct, true);
+    });
+  }
+  if (draftGroupPoint) {
+    createMarker(draftGroupPoint.xPct, draftGroupPoint.yPct, true);
   }
   if (userLocationPoint) {
     renderUserLocationMarker();
@@ -1039,7 +1561,8 @@ function drawClusterLinks(visibleRecords) {
 }
 
 function drawSelectedPointClusterLink(visibleRecords) {
-  if (!selectedPoint || !isCollecting || !currentClusterNumber) {
+  const previewPoints = draftGroupPoint ? [...selectedPoints, draftGroupPoint] : [...selectedPoints];
+  if (!previewPoints.length || !isCollecting || !currentClusterNumber) {
     return;
   }
 
@@ -1059,19 +1582,22 @@ function drawSelectedPointClusterLink(visibleRecords) {
     })
     .filter((entry) => entry !== null);
 
-  if (!currentClusterRecords.length) {
-    return;
+  if (currentClusterRecords.length) {
+    currentClusterRecords.sort((left, right) => {
+      if (left.personNumber !== right.personNumber) {
+        return left.personNumber - right.personNumber;
+      }
+      return String(left.activityTime).localeCompare(String(right.activityTime));
+    });
   }
 
-  currentClusterRecords.sort((left, right) => {
-    if (left.personNumber !== right.personNumber) {
-      return left.personNumber - right.personNumber;
+  let previousPoint = currentClusterRecords[currentClusterRecords.length - 1] || null;
+  previewPoints.forEach((point) => {
+    if (previousPoint) {
+      createClusterLink(previousPoint, point, true);
     }
-    return String(left.activityTime).localeCompare(String(right.activityTime));
+    previousPoint = point;
   });
-
-  const lastPoint = currentClusterRecords[currentClusterRecords.length - 1];
-  createClusterLink(lastPoint, selectedPoint, true);
 }
 
 function createClusterLink(fromPoint, toPoint, preview) {
@@ -1149,7 +1675,11 @@ function createUserLocationMarker(xPct, yPct) {
 }
 
 function renderRecords() {
-  const query = searchInput.value.trim().toLowerCase();
+  if (!recordsTbody) {
+    return;
+  }
+
+  const query = searchInput ? searchInput.value.trim().toLowerCase() : "";
   const filtered = records
     .slice()
     .sort((left, right) => right.activityTime.localeCompare(left.activityTime))

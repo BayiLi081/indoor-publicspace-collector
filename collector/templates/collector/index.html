@@ -5,12 +5,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Indoor Activity Location Recorder</title>
-  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260318-4">
+  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260324-9">
 </head>
 <body>
   <header class="topbar">
-    <h1>Indoor Activity Location Recorder</h1>
-    <p>Pick a map point and/or attach a camera image with GPS metadata before saving.</p>
+    <div class="topbar-row">
+      <div>
+        <h1>Indoor Activity Location Recorder</h1>
+        <p>Capture observations on the map, then save them into the dataset.</p>
+      </div>
+      <nav class="topnav" aria-label="Primary">
+        <a href="{% url 'index' %}"{% if active_page == 'capture' %} class="active"{% endif %}>Capture</a>
+        <a href="{% url 'management' %}"{% if active_page == 'management' %} class="active"{% endif %}>Management</a>
+      </nav>
+    </div>
   </header>
 
   <main class="layout">
@@ -30,8 +38,8 @@
             <button id="zoomInBtn" type="button" class="secondary zoom-btn" aria-label="Zoom in">+</button>
             <button id="zoomResetBtn" type="button" class="secondary zoom-btn">Fit</button>
           </div>
-          <div class="collect-controls">
-            <button id="collectToggleBtn" type="button" class="collect-toggle" aria-pressed="false">Start</button>
+          <div class="collect-controls" hidden>
+            <button id="collectToggleBtn" type="button" class="collect-toggle" aria-pressed="false">End Capture</button>
           </div>
           <div class="locate-controls">
             <button id="locateViaGpsBtn" type="button" class="secondary">Locate via GPS</button>
@@ -50,8 +58,8 @@
           >
         </div>
       </div>
-      <p id="collectStatus" class="collect-status" data-state="muted">Collection is idle. Click Start to begin.</p>
-      <p class="hint">Use + / - / Fit, mouse wheel, or pinch to zoom at any point. Click Start, tap one person position on the map, fill the short form, then save. Click End when the cluster is completed.</p>
+      <p id="collectStatus" class="collect-status" data-state="muted">Select Individual or Group to begin capture.</p>
+      <p class="hint">Use + / - / Fit, mouse wheel, or pinch to zoom at any point. Individual mode needs one map point. In group mode, each map click opens a popup to record that person's activity type, gender, and age group. Save the group only after all members are entered.</p>
     </section>
 
     <section class="form-panel">
@@ -69,47 +77,54 @@
       </div>
 
       <h2 id="activityFormHeading">Record Activity</h2>
-      <input id="recordMode" type="hidden" value="individual">
+      <input id="recordMode" type="hidden" value="">
       <form id="activityForm">
         {% csrf_token %}
-        <div class="input-group">
-          <span>Activity Type</span>
-          <input id="activityType" type="hidden">
-          <div class="activity-type-controls" id="activityTypeControls" role="group" aria-label="Activity type">
-            <button type="button" class="toggle-btn" data-activity-type="Walking" aria-pressed="false">Walking</button>
-            <button type="button" class="toggle-btn" data-activity-type="Strolling" aria-pressed="false">Strolling</button>
-            <button type="button" class="toggle-btn" data-activity-type="Sitting" aria-pressed="false">Sitting</button>
-            <button type="button" class="toggle-btn" data-activity-type="Standing" aria-pressed="false">Standing</button>
-            <button type="button" class="toggle-btn" data-activity-type="Talking" aria-pressed="false">Talking</button>
-            <button type="button" class="toggle-btn" data-activity-type="Queueing" aria-pressed="false">Queueing</button>
-            <button type="button" class="toggle-btn" data-activity-type="Phone Calling" aria-pressed="false">Phone Calling</button>
-            <button type="button" class="toggle-btn" data-activity-type="Smoking" aria-pressed="false">Smoking</button>
-            <button type="button" class="toggle-btn" data-activity-type="Eating / Drinking" aria-pressed="false">Eating / Drinking</button>
-            <button type="button" class="toggle-btn" data-activity-type="Running / Exercising" aria-pressed="false">Running / Exercising</button>
-            <button type="button" class="toggle-btn" data-activity-type="Others" aria-pressed="false">Others</button>
+        <div id="individualDetailFields">
+          <div class="input-group">
+            <span>Activity Type</span>
+            <input id="activityType" type="hidden">
+            <div class="activity-type-controls" id="activityTypeControls" role="group" aria-label="Activity type">
+              <button type="button" class="toggle-btn" data-activity-type="Walking" aria-pressed="false">Walking</button>
+              <button type="button" class="toggle-btn" data-activity-type="Strolling" aria-pressed="false">Strolling</button>
+              <button type="button" class="toggle-btn" data-activity-type="Sitting" aria-pressed="false">Sitting</button>
+              <button type="button" class="toggle-btn" data-activity-type="Standing" aria-pressed="false">Standing</button>
+              <button type="button" class="toggle-btn" data-activity-type="Talking" aria-pressed="false">Talking</button>
+              <button type="button" class="toggle-btn" data-activity-type="Queueing" aria-pressed="false">Queueing</button>
+              <button type="button" class="toggle-btn" data-activity-type="Phone Calling" aria-pressed="false">Phone Calling</button>
+              <button type="button" class="toggle-btn" data-activity-type="Smoking" aria-pressed="false">Smoking</button>
+              <button type="button" class="toggle-btn" data-activity-type="Eating / Drinking" aria-pressed="false">Eating / Drinking</button>
+              <button type="button" class="toggle-btn" data-activity-type="Running / Exercising" aria-pressed="false">Running / Exercising</button>
+              <button type="button" class="toggle-btn" data-activity-type="Others" aria-pressed="false">Others</button>
+            </div>
+            <small class="field-hint">Select one or more activities.</small>
           </div>
-          <small class="field-hint">Select one or more activities.</small>
+
+          <input id="actorId" type="hidden">
+
+          <div class="input-group">
+            <span>Gender</span>
+            <div class="gender-controls" id="genderControls">
+              <button type="button" class="toggle-btn" data-gender="male" aria-pressed="false">Male</button>
+              <button type="button" class="toggle-btn" data-gender="female" aria-pressed="false">Female</button>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <span>Age Group</span>
+            <input id="ageGroup" type="hidden">
+            <div class="gender-controls age-group-controls" id="ageGroupControls" role="group" aria-label="Age group">
+              <button type="button" class="toggle-btn" data-age-group="under-10" data-age-label="<10 years old" aria-pressed="false">&lt;10 years old</button>
+              <button type="button" class="toggle-btn" data-age-group="10-20" data-age-label="10-20 years old" aria-pressed="false">10-20 years old</button>
+              <button type="button" class="toggle-btn" data-age-group="20-60" data-age-label="20-60 years old" aria-pressed="false">20-60 years old</button>
+              <button type="button" class="toggle-btn" data-age-group="over-60" data-age-label=">60 years old" aria-pressed="false">&gt;60 years old</button>
+            </div>
+          </div>
         </div>
 
-        <input id="actorId" type="hidden">
-
-        <div class="input-group">
-          <span>Gender</span>
-          <div class="gender-controls" id="genderControls">
-            <button type="button" class="toggle-btn" data-gender="male" aria-pressed="false">Male</button>
-            <button type="button" class="toggle-btn" data-gender="female" aria-pressed="false">Female</button>
-          </div>
-        </div>
-
-        <div class="input-group">
-          <span>Age Group</span>
-          <input id="ageGroup" type="hidden">
-          <div class="gender-controls age-group-controls" id="ageGroupControls" role="group" aria-label="Age group">
-            <button type="button" class="toggle-btn" data-age-group="under-10" data-age-label="<10 years old" aria-pressed="false">&lt;10 years old</button>
-            <button type="button" class="toggle-btn" data-age-group="10-20" data-age-label="10-20 years old" aria-pressed="false">10-20 years old</button>
-            <button type="button" class="toggle-btn" data-age-group="20-60" data-age-label="20-60 years old" aria-pressed="false">20-60 years old</button>
-            <button type="button" class="toggle-btn" data-age-group="over-60" data-age-label=">60 years old" aria-pressed="false">&gt;60 years old</button>
-          </div>
+        <div id="groupDetailsPanel" class="group-details-panel" hidden>
+          <p id="groupDetailsHint" class="field-hint">Tap a point on the map to open the member details popup.</p>
+          <div id="groupPersonList" class="group-person-list"></div>
         </div>
 
         <label>
@@ -129,12 +144,12 @@
         </label>
 
         <div class="coords">
-          <strong>Selected Point:</strong>
+          <strong>Selected Point(s):</strong>
           <span id="selectedCoords">None</span>
         </div>
 
         <div class="actions">
-          <button type="submit">Save Record</button>
+          <button id="saveRecordBtn" type="submit">Save Record</button>
           <button id="resetFormBtn" type="button" class="secondary">Reset</button>
         </div>
         <p id="savePrompt" class="save-prompt" data-state="muted" role="status" aria-live="polite"></p>
@@ -142,37 +157,64 @@
     </section>
   </main>
 
-  <section class="records-panel">
-    <div class="records-head">
-      <h2>Recorded Activities</h2>
-      <div class="records-actions">
-        <input id="searchInput" type="text" placeholder="Search activity, ID, notes...">
-        <button id="exportBtn" type="button">Export JSON</button>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Activity</th>
-            <th>ID</th>
-            <th>Gender</th>
-            <th>Age Group</th>
-            <th>Building</th>
-            <th>Floor</th>
-            <th>Location (%)</th>
-            <th>Photo</th>
-            <th>Photo GPS</th>
-            <th>Notes</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="recordsTbody"></tbody>
-      </table>
-    </div>
-  </section>
+  <div id="groupPointModal" class="modal-shell" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-group-point-close></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="groupPointModalTitle">
+      <form id="groupPointForm" class="group-point-form">
+        <div class="modal-head">
+          <div>
+            <h3 id="groupPointModalTitle">Group Member Details</h3>
+            <p id="groupPointModalCoords" class="modal-subtitle">Selected point</p>
+          </div>
+        </div>
 
-  <script type="module" src="{% static 'collector/app.js' %}?v=20260318-4"></script>
+        <div class="input-group">
+          <span>Activity Type</span>
+          <div class="activity-type-controls" role="group" aria-label="Group member activity type">
+            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Walking" aria-pressed="false">Walking</button>
+            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Strolling" aria-pressed="false">Strolling</button>
+            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Sitting" aria-pressed="false">Sitting</button>
+            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Standing" aria-pressed="false">Standing</button>
+            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Talking" aria-pressed="false">Talking</button>
+            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Queueing" aria-pressed="false">Queueing</button>
+            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Phone Calling" aria-pressed="false">Phone Calling</button>
+            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Smoking" aria-pressed="false">Smoking</button>
+            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Eating / Drinking" aria-pressed="false">Eating / Drinking</button>
+            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Running / Exercising" aria-pressed="false">Running / Exercising</button>
+            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Others" aria-pressed="false">Others</button>
+          </div>
+          <small class="field-hint">Select one or more activities for this person.</small>
+        </div>
+
+        <div class="input-group">
+          <span>Gender</span>
+          <div class="gender-controls" role="group" aria-label="Group member gender">
+            <button type="button" class="toggle-btn group-point-gender-btn" data-group-point-gender="male" aria-pressed="false">Male</button>
+            <button type="button" class="toggle-btn group-point-gender-btn" data-group-point-gender="female" aria-pressed="false">Female</button>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <span>Age Group</span>
+          <div class="gender-controls age-group-controls" role="group" aria-label="Group member age group">
+            <button type="button" class="toggle-btn group-point-age-btn" data-group-point-age-group="under-10" data-group-point-age-label="<10 years old" aria-pressed="false">&lt;10 years old</button>
+            <button type="button" class="toggle-btn group-point-age-btn" data-group-point-age-group="10-20" data-group-point-age-label="10-20 years old" aria-pressed="false">10-20 years old</button>
+            <button type="button" class="toggle-btn group-point-age-btn" data-group-point-age-group="20-60" data-group-point-age-label="20-60 years old" aria-pressed="false">20-60 years old</button>
+            <button type="button" class="toggle-btn group-point-age-btn" data-group-point-age-group="over-60" data-group-point-age-label=">60 years old" aria-pressed="false">&gt;60 years old</button>
+          </div>
+        </div>
+
+        <p id="groupPointModalPrompt" class="save-prompt" data-state="muted" role="status" aria-live="polite"></p>
+
+        <div class="actions modal-actions">
+          <button id="groupPointRemoveBtn" type="button" class="secondary" hidden>Remove Point</button>
+          <button id="groupPointCancelBtn" type="button" class="secondary">Cancel</button>
+          <button id="groupPointSaveBtn" type="submit">Save Member</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="{% static 'collector/app.js' %}?v=20260324-7"></script>
 </body>
 </html>

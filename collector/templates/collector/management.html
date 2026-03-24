@@ -1,0 +1,114 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Indoor Activity Location Recorder</title>
+  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260324-9">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-row">
+      <div>
+        <h1>Indoor Activity Location Recorder</h1>
+        <p>Review, search, export, and delete saved records without entering capture mode.</p>
+      </div>
+      <nav class="topnav" aria-label="Primary">
+        <a href="{% url 'index' %}"{% if active_page == 'capture' %} class="active"{% endif %}>Capture</a>
+        <a href="{% url 'management' %}"{% if active_page == 'management' %} class="active"{% endif %}>Management</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="management-layout">
+    <section class="management-toolbar">
+      {% csrf_token %}
+      <div class="management-filters">
+        <label>
+          Building
+          <select id="buildingSelect" aria-label="Filter by building"></select>
+        </label>
+
+        <label>
+          Floor
+          <select id="floorSelect" aria-label="Filter by floor"></select>
+        </label>
+
+        <label class="management-search">
+          Search
+          <input id="searchInput" type="text" placeholder="Search activity, ID, notes, photo...">
+        </label>
+      </div>
+
+      <div class="management-actions">
+        <p id="managementStatus" class="save-prompt" data-state="muted" role="status" aria-live="polite"></p>
+        <button id="refreshBtn" type="button" class="secondary">Refresh</button>
+        <button id="exportBtn" type="button">Export JSON</button>
+      </div>
+    </section>
+
+    <section class="map-panel management-map-panel">
+      <div class="panel-head">
+        <div class="panel-head-copy">
+          <h2>Map Visualisation</h2>
+          <p id="managementMapStatus" class="records-summary">Select one building and one floor to display the map.</p>
+        </div>
+        <div class="zoom-controls" role="group" aria-label="Map zoom controls">
+          <button id="managementZoomOutBtn" type="button" class="secondary zoom-btn" aria-label="Zoom out">-</button>
+          <span id="managementZoomValue" class="zoom-value">100%</span>
+          <button id="managementZoomInBtn" type="button" class="secondary zoom-btn" aria-label="Zoom in">+</button>
+          <button id="managementZoomResetBtn" type="button" class="secondary zoom-btn">Fit</button>
+        </div>
+      </div>
+      <div class="map-wrap" id="managementMapWrap">
+        <div class="map-canvas" id="managementMapCanvas">
+          <img id="managementMapImage" alt="Indoor map visualisation">
+        </div>
+        <div id="managementMapEmptyState" class="map-empty-state">Select one building and one floor to display the map.</div>
+        <aside id="managementMapPopup" class="management-map-popup" hidden aria-live="polite">
+          <div class="management-map-popup-head">
+            <div>
+              <h3 id="managementMapPopupTitle">Selection Details</h3>
+              <p id="managementMapPopupSubtitle" class="management-map-popup-subtitle">Click a point or group line on the map.</p>
+            </div>
+            <button id="managementMapPopupCloseBtn" type="button" class="secondary">Close</button>
+          </div>
+          <div id="managementMapPopupBody" class="management-map-popup-body"></div>
+        </aside>
+      </div>
+      <p class="hint">The map shows only the records matching the current building, floor, and search filters. Click a point to inspect one record, or click a connecting line to inspect the full group.</p>
+    </section>
+
+    <section class="records-panel">
+      <div class="records-head">
+        <h2>Recorded Activities</h2>
+        <p id="recordCount" class="records-summary">0 records</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Activity</th>
+              <th>ID</th>
+              <th>Gender</th>
+              <th>Age Group</th>
+              <th>Building</th>
+              <th>Floor</th>
+              <th>Location (%)</th>
+              <th>Photo</th>
+              <th>Photo GPS</th>
+              <th>Notes</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="recordsTbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="{% static 'collector/management.js' %}?v=20260324-9"></script>
+</body>
+</html>

@@ -4,6 +4,7 @@ from . import views
 
 urlpatterns = [
   path("", views.index, name="index"),
+  path("management/", views.management, name="management"),
   path("api/buildings/", views.api_buildings, name="api_buildings"),
   path("api/locate-via-gps/", views.api_locate_via_gps, name="api_locate_via_gps"),
   path("api/records/", views.api_records, name="api_records"),

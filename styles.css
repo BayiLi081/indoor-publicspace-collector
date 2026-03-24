@@ -13,6 +13,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
@@ -55,8 +59,39 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 12;
   padding: 0.8rem;
+  background: var(--panel);
   border-bottom: 1px solid var(--line);
+}
+
+.map-panel.capture-active .panel-head {
+  background: var(--danger);
+  border-bottom-color: #8e1f17;
+  box-shadow: 0 8px 24px rgba(180, 35, 24, 0.18);
+}
+
+.map-panel.capture-active .panel-head,
+.map-panel.capture-active .panel-head label,
+.map-panel.capture-active .panel-head .zoom-value,
+.map-panel.capture-active .panel-head .locate-status {
+  color: #fff;
+}
+
+.map-panel.capture-active .panel-head button.secondary,
+.map-panel.capture-active .panel-head button.collect-toggle {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(255, 255, 255, 0.9);
+  color: #8e1f17;
+}
+
+.map-panel.capture-active .panel-head button.secondary:hover,
+.map-panel.capture-active .panel-head button.collect-toggle:hover {
+  background: #fff3f2;
+  border-color: #fff3f2;
+  color: #7a1a14;
 }
 
 .map-controls {
@@ -471,6 +506,10 @@ th {
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;
+  }
+
+  .map-wrap {
+    min-height: 0;
   }
 
   .panel-head {
