@@ -59,10 +59,16 @@ const zoomOutBtn = document.getElementById("zoomOutBtn");
 const zoomInBtn = document.getElementById("zoomInBtn");
 const zoomResetBtn = document.getElementById("zoomResetBtn");
 const zoomValue = document.getElementById("zoomValue");
-const activityTypeButtons = Array.from(document.querySelectorAll(".activity-type-btn[data-activity-type]"));
-const genderButtons = Array.from(document.querySelectorAll(".gender-btn[data-gender]"));
-const ageGroupButtons = Array.from(document.querySelectorAll(".age-group-btn[data-age-group]"));
+const activityTypeButtons = Array.from(document.querySelectorAll(".toggle-btn[data-activity-type]"));
+const genderButtons = Array.from(document.querySelectorAll(".toggle-btn[data-gender]"));
+const ageGroupButtons = Array.from(document.querySelectorAll(".toggle-btn[data-age-group]"));
+const indivGrpButtons = Array.from(document.querySelectorAll(".indivgrp-btn[data-indivgrp-type]"));
+const activityFormHeading = document.getElementById("activityFormHeading");
+const recordMode = document.getElementById("recordMode");
 const savePrompt = document.getElementById("savePrompt");
+const grpCounterDown= document.getElementById("grpCounterDown");
+const grpCounterUp = document.getElementById("grpCounterUp");
+const groupValue = document.getElementById("groupValue");
 
 let records = loadRecords();
 let selectedPoint = null;
@@ -138,6 +144,10 @@ async function initialize() {
     zoomInBtn.addEventListener("click", () => changeMapZoom(MAP_ZOOM_STEP));
   zoomResetBtn.addEventListener("click", () => setMapZoom(DEFAULT_MAP_ZOOM, { preserveCenter: false }));
   }
+  if (grpCounterUp && grpCounterDown) {
+    grpCounterUp.addEventListener("click", () => changeGrpCount(1));
+    grpCounterDown.addEventListener("click", () => changeGrpCount(-1));
+  }
   activityTypeButtons.forEach((button) => {
     button.addEventListener("click", () => toggleActivityType(button.dataset.activityType || ""));
   });
@@ -146,6 +156,9 @@ async function initialize() {
   });
   ageGroupButtons.forEach((button) => {
     button.addEventListener("click", () => setSelectedAgeGroup(button.dataset.ageGroup || ""));
+  });
+  indivGrpButtons.forEach((button) => {
+    button.addEventListener("click", () => setRecordMode(button.dataset.indivgrpType || ""));
   });
   if (locateViaGpsBtn) {
     locateViaGpsBtn.addEventListener("click", onLocateViaGps);
@@ -156,6 +169,7 @@ async function initialize() {
   setSelectedActivityTypes([]);
   setSelectedGender("");
   setSelectedAgeGroup("");
+  setRecordMode("individual");
 
   await loadBuildingMaps();
   lastGeneratedClusterNumber = getMaxKnownClusterNumber(records);
@@ -450,6 +464,18 @@ function setSelectedAgeGroup(value) {
   });
 }
 
+function setRecordMode(value) {
+  const mode = value === "individual" || value === "group" ? value : "individual";
+  recordMode.value = mode;
+  indivGrpButtons.forEach((button) => {
+    const isActive = button.dataset.indivgrpType === mode;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+  const headingText = mode === "group" ? "Record Predominant Activity" : "Record Activity";
+  activityFormHeading.textContent = headingText;
+}
+
 function initializeAutoIdsForCollection() {
   lastGeneratedClusterNumber = Math.max(lastGeneratedClusterNumber, getMaxKnownClusterNumber(records));
   currentClusterNumber = lastGeneratedClusterNumber + 1;
@@ -605,6 +631,18 @@ function setMapZoom(nextZoom, options = {}) {
   const clampedZoom = clampZoom(nextZoom);
   if (!Number.isFinite(clampedZoom)) {
     return;
+  }
+
+  function changeGrpCount(delta) {
+    let groupCount = 2
+    groupCount += delta;
+
+  // Prevent going below 1 (or 0 if you prefer)
+  if (groupCount < 2) groupCount = 2;
+
+  if (groupValue) {
+    groupValue.textContent = groupCount;
+  }
   }
 
   const previousWidth = mapCanvas ? mapCanvas.clientWidth : 0;
