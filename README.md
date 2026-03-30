@@ -1,5 +1,27 @@
 # Indoor Data Collector (Django)
 
+<div align="center">
+    <a href="https://lkycic.sutd.edu.sg/">
+        <img src="https://img.shields.io/badge/LKYCIC-SUTD-blue" alt="LKYCIC-SUTD">
+    </a>
+    <a href="https://img.shields.io/github/stars/BayiLi081/indoor-activities-collector/graphs/contributors">
+        <img src="https://img.shields.io/github/contributors/BayiLi081/indoor-activities-collector.svg" alt="GitHub contributors">
+    </a>
+    <a href="https://github.com/BayiLi081/GIS-training/blob/main/LICENSE">
+        <img src="https://img.shields.io/github/license/BayiLi081/indoor-activities-collector?color=blue" alt="GitHub license">
+    </a>
+    <a href="https://deepwiki.com/BayiLi081/indoor-activities-collector">
+        <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki">
+    </a>
+    <br>
+    <a href="hhttps://github.com/BayiLi081/GIS-training">
+        <img src="https://img.shields.io/github/stars/BayiLi081/indoor-activities-collector" alt="GitHub stars">
+    </a>
+    <a href="https://github.com/BayiLi081/GIS-training/fork">
+        <img src="https://img.shields.io/github/forks/BayiLi081/indoor-activities-collector" alt="GitHub forks">
+    </a>
+</div>
+
 A Django-based web app to record where human activities happen on an indoor map.
 
 ## What Changed
@@ -21,6 +43,7 @@ This project has been rewritten from a static site into a Django application wit
 - Use the "Locate via GPS" button to convert the device location into map percentages (calibrated via `assets/<building>/gps-map.json`), then show the current position and device direction on the floor plan when supported by the browser.
 - Use the "Locate via POI" button to show named points of interest from `assets/<building>/poi.json` on the current floor plan.
 - Save activity details (type, ID, timestamp, notes) with map point and/or photo GPS.
+
 - Persist records in Django database.
 - Search, delete, and export records as JSON.
 
