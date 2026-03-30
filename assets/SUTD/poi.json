@@ -1,0 +1,64 @@
+{
+  "ground-floor": {
+    "referencePoints": [
+      {
+        "xPct": 40.55,
+        "yPct": 76.56,
+        "name": "Library, SUTD"
+      },
+      {
+        "xPct": 54.47,
+        "yPct": 55.64,
+        "name": "One Stop Centre, SUTD"
+      },
+      {
+        "xPct": 28.91,
+        "yPct": 57.85,
+        "name": "gomgom, SUTD"
+      }
+    ]
+  },
+  "main-buildings": {
+    "referencePoints": [
+      {
+        "xPct": 10.13,
+        "yPct": 57.24,
+        "name": "Upper Changi MRT EXIT, SUTD"
+      },
+      {
+        "xPct": 26.98,
+        "yPct": 71.78,
+        "name": "Building 1, SUTD"
+      },
+      {
+        "xPct": 26.32,
+        "yPct": 55.18,
+        "name": "Building 2, SUTD"
+      },
+      {
+        "xPct": 52.51,
+        "yPct": 56.51,
+        "name": "Building 3, SUTD"
+      }
+    ]
+  },
+  "second-floor": {
+    "referencePoints": [
+      {
+        "xPct": 51.39,
+        "yPct": 51.21,
+        "name": "LKYCIC, SUTD"
+      },
+      {
+        "xPct": 40.55,
+        "yPct": 76.56,
+        "name": "Library, SUTD"
+      },
+      {
+        "xPct": 41.84,
+        "yPct": 52.46,
+        "name": "Canteen, SUTD"
+      }
+    ]
+  }
+}

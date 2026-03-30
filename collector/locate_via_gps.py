@@ -53,6 +53,20 @@ def locate_map_point_from_gps(building_id: str, floor_id: str, latitude: Any, lo
   return {"xPct": x_pct, "yPct": y_pct}
 
 
+def get_floor_heading_offset(building_id: str, floor_id: str) -> Decimal:
+  """Return the optional heading offset to align device direction with the current map."""
+
+  normalized_building_id = _normalize_identifier(building_id)
+  normalized_floor_id = _normalize_identifier(floor_id)
+  floor_payload = _load_floor_payload(normalized_building_id, normalized_floor_id)
+
+  return _parse_optional_decimal_field(
+    floor_payload,
+    ("headingOffsetDeg", "mapHeadingOffsetDeg", "directionOffsetDeg"),
+    Decimal("0"),
+  )
+
+
 def _normalize_identifier(value: Any) -> str:
   if not isinstance(value, str):
     raise GPSMappingError("Building and floor identifiers are required.")
@@ -68,17 +82,7 @@ def _normalize_identifier(value: Any) -> str:
 
 
 def _load_floor_anchors(building_id: str, floor_id: str) -> List[_GpsAnchor]:
-  building_data = _load_building_calibration(building_id)
-  floor_payload = _get_floor_payload(building_data, floor_id)
-
-  # If the requested floor is missing, refresh cache once in case the file was updated at runtime.
-  if floor_payload is None:
-    _CALIBRATION_CACHE.pop(building_id, None)
-    building_data = _load_building_calibration(building_id)
-    floor_payload = _get_floor_payload(building_data, floor_id)
-
-  if not isinstance(floor_payload, dict):
-    raise GPSMappingError("GPS calibration is unavailable for this floor.")
+  floor_payload = _load_floor_payload(building_id, floor_id)
 
   raw_points = None
   for key in ("referencePoints", "anchors", "points"):
@@ -100,6 +104,22 @@ def _load_floor_anchors(building_id: str, floor_id: str) -> List[_GpsAnchor]:
     raise GPSMappingError("GPS calibration requires at least two anchor points.")
 
   return anchors
+
+
+def _load_floor_payload(building_id: str, floor_id: str) -> Dict[str, Any]:
+  building_data = _load_building_calibration(building_id)
+  floor_payload = _get_floor_payload(building_data, floor_id)
+
+  # If the requested floor is missing, refresh cache once in case the file was updated at runtime.
+  if floor_payload is None:
+    _CALIBRATION_CACHE.pop(building_id, None)
+    building_data = _load_building_calibration(building_id)
+    floor_payload = _get_floor_payload(building_data, floor_id)
+
+  if not isinstance(floor_payload, dict):
+    raise GPSMappingError("GPS calibration is unavailable for this floor.")
+
+  return floor_payload
 
 
 def _get_floor_payload(building_data: Dict[str, Any], floor_id: str) -> Any:
@@ -136,6 +156,23 @@ def _parse_decimal_field(source: dict[str, Any], keys: tuple[str, ...], label: s
       break
 
   raise GPSMappingError(f"GPS map anchor is missing a valid {label} value.")
+
+
+def _parse_optional_decimal_field(source: dict[str, Any], keys: tuple[str, ...], default: Decimal) -> Decimal:
+  for key in keys:
+    if key not in source:
+      continue
+
+    value = source[key]
+    if value is None:
+      continue
+
+    try:
+      return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+      continue
+
+  return default
 
 
 def _to_decimal(value: Any, label: str) -> Decimal:

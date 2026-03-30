@@ -18,7 +18,7 @@ from django.views.decorators.http import require_http_methods
 
 from .building_catalog import discover_building_maps as discover_building_maps_catalog
 from .floorplan_svg import convert_jpg_floorplan_to_svg, should_regenerate_jpg_wrapper
-from .locate_via_gps import GPSMappingError, locate_map_point_from_gps
+from .locate_via_gps import GPSMappingError, get_floor_heading_offset, locate_map_point_from_gps
 from .models import ActivityRecord
 
 ROOT_BUILDING_ID = "__root__"
@@ -87,6 +87,7 @@ def api_locate_via_gps(request: HttpRequest) -> JsonResponse:
 
   try:
     mapped_point = locate_map_point_from_gps(building_id, floor_id, latitude, longitude)
+    heading_offset = get_floor_heading_offset(building_id, floor_id)
   except GPSMappingError as exc:
     return JsonResponse({"error": str(exc)}, status=400)
 
@@ -94,6 +95,7 @@ def api_locate_via_gps(request: HttpRequest) -> JsonResponse:
     {
       "buildingId": building_id,
       "floorId": floor_id,
+      "headingOffsetDeg": float(heading_offset),
       "location": {
         "xPct": float(mapped_point["xPct"]),
         "yPct": float(mapped_point["yPct"]),

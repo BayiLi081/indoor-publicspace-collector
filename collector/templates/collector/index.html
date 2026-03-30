@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Indoor Activity Location Recorder</title>
-  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260324-9">
+  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260330-11">
 </head>
 <body>
   <header class="topbar">
@@ -42,9 +42,12 @@
             <button id="collectToggleBtn" type="button" class="collect-toggle" aria-pressed="false">End Capture</button>
           </div>
           <div class="locate-controls">
-            <button id="locateViaGpsBtn" type="button" class="secondary">Locate via GPS</button>
+            <div class="locate-button-row" role="group" aria-label="Map location tools">
+              <button id="locateViaGpsBtn" type="button" class="secondary">Locate via GPS</button>
+              <button id="locateViaPoiBtn" type="button" class="secondary" aria-pressed="false">Locate via POI</button>
+            </div>
             <small id="locateStatus" class="locate-status" data-state="muted" role="status" aria-live="polite">
-              Tap Locate via GPS to see your approximate spot.
+              Use Locate via GPS for your approximate spot, or Locate via POI to show named places.
             </small>
           </div>
         </div>
@@ -215,6 +218,6 @@
     </div>
   </div>
 
-  <script type="module" src="{% static 'collector/app.js' %}?v=20260324-7"></script>
+  <script type="module" src="{% static 'collector/app.js' %}?v=20260330-9"></script>
 </body>
 </html>

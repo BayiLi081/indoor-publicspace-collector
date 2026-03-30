@@ -1,5 +1,6 @@
 const EXIFR_MODULE_URL = "https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/lite.esm.js";
 const DEFAULT_GEOLOCATION_TIMEOUT_MS = 12000;
+const DEFAULT_DIRECTION_TIMEOUT_MS = 2500;
 let gpsReaderPromise = null;
 
 function round6(value) {
@@ -8,6 +9,19 @@ function round6(value) {
 
 function round2(value) {
   return Math.round(value * 100) / 100;
+}
+
+function round1(value) {
+  return Math.round(value * 10) / 10;
+}
+
+function normalizeHeading(value) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  const normalized = value % 360;
+  return round1(normalized < 0 ? normalized + 360 : normalized);
 }
 
 async function getGpsReader() {
@@ -54,6 +68,84 @@ function hasGeolocationSupport() {
   );
 }
 
+function hasDeviceOrientationSupport() {
+  return typeof window !== "undefined" && typeof window.DeviceOrientationEvent !== "undefined";
+}
+
+function readHeadingFromCoordinates(coords) {
+  if (!coords || typeof coords !== "object") {
+    return null;
+  }
+
+  const heading = normalizeHeading(coords.heading);
+  if (heading === null) {
+    return null;
+  }
+
+  return {
+    heading,
+    source: "geolocation",
+  };
+}
+
+function readDirectionFromOrientationEvent(event) {
+  if (!event || typeof event !== "object") {
+    return null;
+  }
+
+  const webkitCompassHeading = normalizeHeading(event.webkitCompassHeading);
+  if (webkitCompassHeading !== null) {
+    const direction = {
+      heading: webkitCompassHeading,
+      source: "orientation",
+    };
+
+    if (Number.isFinite(event.webkitCompassAccuracy)) {
+      direction.accuracy = round1(Math.abs(event.webkitCompassAccuracy));
+    }
+
+    return direction;
+  }
+
+  if (event.absolute !== true) {
+    return null;
+  }
+
+  const alpha = normalizeHeading(event.alpha);
+  if (alpha === null) {
+    return null;
+  }
+
+  return {
+    // Best-effort compass heading derived from the absolute z-axis rotation.
+    heading: normalizeHeading(360 - alpha),
+    source: "orientation",
+  };
+}
+
+async function requestDeviceOrientationPermission() {
+  if (!hasDeviceOrientationSupport()) {
+    return false;
+  }
+
+  const orientationEvent = window.DeviceOrientationEvent;
+  if (!orientationEvent || typeof orientationEvent.requestPermission !== "function") {
+    return true;
+  }
+
+  try {
+    const permission = await orientationEvent.requestPermission(true);
+    return permission === "granted";
+  } catch (error) {
+    try {
+      const permission = await orientationEvent.requestPermission();
+      return permission === "granted";
+    } catch (_fallbackError) {
+      return false;
+    }
+  }
+}
+
 function geolocationErrorMessage(error) {
   if (!error || typeof error.code !== "number") {
     return "Could not get current device location.";
@@ -93,9 +185,15 @@ export async function requestCurrentDeviceLocation({
           latitude: round6(coords.latitude),
           longitude: round6(coords.longitude),
         };
+        const headingData = readHeadingFromCoordinates(coords);
 
         if (Number.isFinite(coords.altitude)) {
           location.altitude = round2(coords.altitude);
+        }
+
+        if (headingData) {
+          location.heading = headingData.heading;
+          location.headingSource = headingData.source;
         }
 
         resolve(location);
@@ -107,5 +205,69 @@ export async function requestCurrentDeviceLocation({
         maximumAge: maximumAgeMs,
       }
     );
+  });
+}
+
+export async function requestCurrentDeviceDirection({
+  timeoutMs = DEFAULT_DIRECTION_TIMEOUT_MS,
+  signal = null,
+} = {}) {
+  if (!hasDeviceOrientationSupport()) {
+    return null;
+  }
+
+  if (typeof window !== "undefined" && !window.isSecureContext) {
+    return null;
+  }
+
+  const permissionGranted = await requestDeviceOrientationPermission();
+  if (!permissionGranted) {
+    return null;
+  }
+
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve(null);
+      return;
+    }
+
+    const eventNames = ["deviceorientationabsolute", "deviceorientation"];
+    let settled = false;
+    let timeoutId = 0;
+
+    const cleanup = () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+      eventNames.forEach((eventName) => {
+        window.removeEventListener(eventName, onOrientation);
+      });
+      signal?.removeEventListener("abort", onAbort);
+    };
+
+    const finish = (value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+
+    const onAbort = () => finish(null);
+
+    const onOrientation = (event) => {
+      const direction = readDirectionFromOrientationEvent(event);
+      if (!direction) {
+        return;
+      }
+      finish(direction);
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+    eventNames.forEach((eventName) => {
+      window.addEventListener(eventName, onOrientation);
+    });
+    timeoutId = window.setTimeout(() => finish(null), timeoutMs);
   });
 }

@@ -1,8 +1,9 @@
-import { extractPhotoLocationFromImage, requestCurrentDeviceLocation } from "./image-location.js";
+import { extractPhotoLocationFromImage, requestCurrentDeviceDirection, requestCurrentDeviceLocation } from "./image-location.js";
 
 const API_BUILDINGS = "/api/buildings/";
 const API_RECORDS = "/api/records/";
 const API_RECORDS_EXPORT = "/api/records/export/";
+const DEFAULT_LOCATE_STATUS_MESSAGE = "Use Locate via GPS for your approximate spot, or Locate via POI to show named places.";
 
 const ROOT_BUILDING_ID = "__root__";
 const DEFAULT_BUILDING_ID = "SUTD";
@@ -71,6 +72,7 @@ const collectToggleBtn = document.getElementById("collectToggleBtn");
 const collectControls = collectToggleBtn ? collectToggleBtn.closest(".collect-controls") : null;
 const collectStatus = document.getElementById("collectStatus");
 const locateViaGpsBtn = document.getElementById("locateViaGpsBtn");
+const locateViaPoiBtn = document.getElementById("locateViaPoiBtn");
 const locateStatus = document.getElementById("locateStatus");
 const zoomOutBtn = document.getElementById("zoomOutBtn");
 const zoomInBtn = document.getElementById("zoomInBtn");
@@ -102,6 +104,8 @@ const groupPointSaveBtn = document.getElementById("groupPointSaveBtn");
 const groupPointActivityButtons = Array.from(document.querySelectorAll(".group-point-activity-btn"));
 const groupPointGenderButtons = Array.from(document.querySelectorAll(".group-point-gender-btn"));
 const groupPointAgeButtons = Array.from(document.querySelectorAll(".group-point-age-btn"));
+const poiMapsCache = new Map();
+const poiLoadPromises = new Map();
 
 let records = [];
 let selectedPoints = [];
@@ -123,6 +127,10 @@ let savePromptTimerId = 0;
 let mapZoomLevel = DEFAULT_MAP_ZOOM;
 let userLocationPoint = null;
 let isLocatingViaGps = false;
+let isLocatingViaPoi = false;
+let poiVisible = false;
+let poiRequestToken = 0;
+let shouldAnimatePois = false;
 let lastZoomAnchor = null;
 let pinchStartDistance = 0;
 let pinchStartZoom = DEFAULT_MAP_ZOOM;
@@ -140,7 +148,8 @@ initialize().catch((error) => {
 async function initialize() {
   activityTime.value = toDateTimeLocalValue(new Date());
   setPhotoLocationStatus("No image selected.", "muted");
-  setLocateStatus("Tap Locate via GPS to see your approximate spot.", "muted");
+  setLocateStatus(DEFAULT_LOCATE_STATUS_MESSAGE, "muted");
+  setPoiOverlayButtonState(false);
   setSavePrompt("", "muted");
 
   buildingSelect.innerHTML = "<option>Loading...</option>";
@@ -198,6 +207,9 @@ async function initialize() {
   }
   if (locateViaGpsBtn) {
     locateViaGpsBtn.addEventListener("click", onLocateViaGps);
+  }
+  if (locateViaPoiBtn) {
+    locateViaPoiBtn.addEventListener("click", onLocateViaPoi);
   }
   if (groupPointForm) {
     groupPointForm.addEventListener("submit", onGroupPointFormSubmit);
@@ -279,20 +291,30 @@ function onBuildingChange(event) {
   renderFloorOptions(currentBuildingId);
   currentFloorId = floorSelect.value || "";
   userLocationPoint = null;
-  setLocateStatus("Tap Locate via GPS to see your approximate spot.", "muted");
+  if (!poiVisible) {
+    resetLocateStatusToBase();
+  }
 
   updateMapForSelection();
   clearTemporarySelection();
   renderRecords();
+  if (poiVisible) {
+    void refreshPoiOverlayForCurrentFloor({ animate: true, loadingMessage: "Loading POIs for this floor..." });
+  }
 }
 
 function onFloorChange(event) {
   currentFloorId = event.target.value;
   userLocationPoint = null;
-  setLocateStatus("Tap Locate via GPS to see your approximate spot.", "muted");
+  if (!poiVisible) {
+    resetLocateStatusToBase();
+  }
   updateMapForSelection();
   clearTemporarySelection();
   renderRecords();
+  if (poiVisible) {
+    void refreshPoiOverlayForCurrentFloor({ animate: true, loadingMessage: "Loading POIs for this floor..." });
+  }
 }
 
 function onCollectToggle() {
@@ -1196,10 +1218,29 @@ async function onLocateViaGps() {
 
   isLocatingViaGps = true;
   locateViaGpsBtn.disabled = true;
-  setLocateStatus("Requesting device location...", "muted");
+  setLocateStatus("Requesting device location and direction...", "muted");
+
+  const directionAbortController = typeof AbortController === "function" ? new AbortController() : null;
+  const directionPromise = requestCurrentDeviceDirection({
+    signal: directionAbortController?.signal || null,
+  }).catch((error) => {
+    console.warn("Device direction unavailable:", error);
+    return null;
+  });
 
   try {
     const deviceLocation = await requestCurrentDeviceLocation();
+    let deviceDirection =
+      Number.isFinite(deviceLocation.heading) && typeof deviceLocation.headingSource === "string"
+        ? { heading: deviceLocation.heading, source: deviceLocation.headingSource }
+        : null;
+
+    if (deviceDirection) {
+      directionAbortController?.abort();
+    } else {
+      deviceDirection = await directionPromise;
+    }
+
     const params = new URLSearchParams({
       building_id: currentBuildingId,
       floor_id: currentFloorId,
@@ -1222,25 +1263,101 @@ async function onLocateViaGps() {
       throw new Error("Server did not return a valid location.");
     }
 
+    const displayHeading = applyHeadingOffset(deviceDirection?.heading, payload?.headingOffsetDeg);
+
     userLocationPoint = {
       xPct: clampPercent(location.xPct),
       yPct: clampPercent(location.yPct),
+      heading: displayHeading,
+      rawHeading: Number.isFinite(deviceDirection?.heading) ? deviceDirection.heading : null,
+      headingSource: typeof deviceDirection?.source === "string" ? deviceDirection.source : "",
       source: deviceLocation,
     };
 
-    setLocateStatus(
-      `Image location ${round2(userLocationPoint.xPct)}%, ${round2(userLocationPoint.yPct)}%`,
-      "success"
-    );
+    setLocateStatus(buildLocateStatusMessage(userLocationPoint), "success");
     renderMarkers();
   } catch (error) {
     console.error("Locate via GPS failed:", error);
+    directionAbortController?.abort();
     userLocationPoint = null;
     setLocateStatus(error?.message || "Could not determine location.", "error");
     renderMarkers();
   } finally {
+    directionAbortController?.abort();
     isLocatingViaGps = false;
     locateViaGpsBtn.disabled = false;
+  }
+}
+
+async function onLocateViaPoi() {
+  if (!locateViaPoiBtn || isLocatingViaPoi) {
+    return;
+  }
+
+  if (!currentBuildingId || !currentFloorId) {
+    setLocateStatus("Select a building and floor first.", "warn");
+    return;
+  }
+
+  if (poiVisible) {
+    poiVisible = false;
+    poiRequestToken += 1;
+    shouldAnimatePois = false;
+    setPoiOverlayButtonState(false);
+    renderMarkers();
+    resetLocateStatusToBase();
+    return;
+  }
+
+  poiVisible = true;
+  setPoiOverlayButtonState(true);
+  await refreshPoiOverlayForCurrentFloor({ animate: true, loadingMessage: "Loading POIs for this floor..." });
+}
+
+async function refreshPoiOverlayForCurrentFloor({ animate = false, loadingMessage = "" } = {}) {
+  if (!poiVisible) {
+    renderMarkers();
+    return;
+  }
+
+  if (!currentBuildingId || !currentFloorId) {
+    renderMarkers();
+    return;
+  }
+
+  const buildingId = currentBuildingId;
+  const floorId = currentFloorId;
+  const requestToken = ++poiRequestToken;
+
+  if (animate) {
+    shouldAnimatePois = true;
+  }
+
+  setPoiLoadingState(true);
+  if (loadingMessage) {
+    setLocateStatus(loadingMessage, "muted");
+  }
+
+  try {
+    await loadPoiMapsForBuilding(buildingId);
+    if (!poiVisible || requestToken !== poiRequestToken || buildingId !== currentBuildingId || floorId !== currentFloorId) {
+      return;
+    }
+
+    renderMarkers();
+    const status = buildPoiOverlayStatus(buildingId, floorId);
+    setLocateStatus(status.message, status.state);
+  } catch (error) {
+    if (requestToken !== poiRequestToken) {
+      return;
+    }
+
+    renderMarkers();
+    setLocateStatus(error?.message || "Could not load POIs.", "error");
+  } finally {
+    if (requestToken === poiRequestToken) {
+      setPoiLoadingState(false);
+    }
   }
 }
 
@@ -1489,7 +1606,7 @@ async function deleteRecord(id) {
 
 function renderMarkers() {
   const overlayHost = mapCanvas || mapWrap;
-  overlayHost.querySelectorAll(".marker, .cluster-link").forEach((node) => node.remove());
+  overlayHost.querySelectorAll(".marker, .cluster-link, .poi-marker").forEach((node) => node.remove());
 
   const visibleRecords = records.filter((record) => {
     const recordBuildingId = getRecordBuildingId(record);
@@ -1510,6 +1627,10 @@ function renderMarkers() {
   visibleRecords.forEach((record) => {
     createMarker(record.location.xPct, record.location.yPct, false);
   });
+
+  if (poiVisible) {
+    renderPoiMarkers();
+  }
 
   if (selectedPoints.length || draftGroupPoint) {
     drawSelectedPointClusterLink(visibleRecords);
@@ -1658,10 +1779,28 @@ function renderUserLocationMarker() {
     return;
   }
 
-  createUserLocationMarker(userLocationPoint.xPct, userLocationPoint.yPct);
+  createUserLocationMarker(userLocationPoint.xPct, userLocationPoint.yPct, userLocationPoint.heading);
 }
 
-function createUserLocationMarker(xPct, yPct) {
+function renderPoiMarkers() {
+  if (!currentBuildingId || !currentFloorId || !poiMapsCache.has(currentBuildingId)) {
+    return;
+  }
+
+  const poiPoints = getPoiPointsForFloor(currentBuildingId, currentFloorId);
+  if (!poiPoints.length) {
+    shouldAnimatePois = false;
+    return;
+  }
+
+  const animate = shouldAnimatePois;
+  poiPoints.forEach((point, index) => {
+    createPoiMarker(point, index, animate);
+  });
+  shouldAnimatePois = false;
+}
+
+function createUserLocationMarker(xPct, yPct, heading) {
   const overlayHost = mapCanvas || mapWrap;
   if (!overlayHost || !Number.isFinite(xPct) || !Number.isFinite(yPct)) {
     return;
@@ -1671,6 +1810,49 @@ function createUserLocationMarker(xPct, yPct) {
   marker.className = "marker user-location";
   marker.style.left = `${xPct}%`;
   marker.style.top = `${yPct}%`;
+
+  if (Number.isFinite(heading)) {
+    marker.classList.add("has-direction");
+    const direction = document.createElement("span");
+    direction.className = "marker-direction";
+    direction.style.transform = `translate(-50%, -82%) rotate(${heading}deg)`;
+    marker.appendChild(direction);
+  }
+
+  overlayHost.appendChild(marker);
+}
+
+function createPoiMarker(point, index, animate) {
+  const overlayHost = mapCanvas || mapWrap;
+  if (!overlayHost || !point || !Number.isFinite(point.xPct) || !Number.isFinite(point.yPct)) {
+    return;
+  }
+
+  const marker = document.createElement("span");
+  marker.className = animate ? "poi-marker is-appearing" : "poi-marker";
+  marker.style.left = `${point.xPct}%`;
+  marker.style.top = `${point.yPct}%`;
+  if (animate) {
+    marker.style.setProperty("--poi-delay", `${Math.min(index * 70, 420)}ms`);
+  }
+
+  const nodeAnchor = document.createElement("span");
+  nodeAnchor.className = "poi-node-anchor";
+
+  const node = document.createElement("span");
+  node.className = "poi-node";
+  nodeAnchor.appendChild(node);
+
+  const labelAnchor = document.createElement("span");
+  labelAnchor.className = "poi-label-anchor";
+
+  const label = document.createElement("span");
+  label.className = "poi-label";
+  label.textContent = point.name;
+  labelAnchor.appendChild(label);
+
+  marker.appendChild(nodeAnchor);
+  marker.appendChild(labelAnchor);
   overlayHost.appendChild(marker);
 }
 
@@ -2173,6 +2355,251 @@ function formatDate(isoString) {
 
 function formatCoordinate(value) {
   return (Math.round(value * 1000000) / 1000000).toFixed(6);
+}
+
+function normalizeHeadingDegrees(value) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  const normalized = value % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+}
+
+function applyHeadingOffset(heading, offset) {
+  const normalizedHeading = normalizeHeadingDegrees(heading);
+  if (normalizedHeading === null) {
+    return null;
+  }
+
+  const safeOffset = Number.isFinite(offset) ? offset : 0;
+  return normalizeHeadingDegrees(normalizedHeading + safeOffset);
+}
+
+function getCompassDirectionLabel(heading) {
+  const normalizedHeading = normalizeHeadingDegrees(heading);
+  if (normalizedHeading === null) {
+    return "";
+  }
+
+  const directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  return directions[Math.round(normalizedHeading / 45) % directions.length];
+}
+
+function formatHeadingLabel(heading) {
+  const normalizedHeading = normalizeHeadingDegrees(heading);
+  if (normalizedHeading === null) {
+    return "";
+  }
+
+  return `${getCompassDirectionLabel(normalizedHeading)} (${Math.round(normalizedHeading)}°)`;
+}
+
+function buildLocateStatusMessage(locationPoint) {
+  const locationText = `Map location ${round2(locationPoint.xPct)}%, ${round2(locationPoint.yPct)}%`;
+  const headingLabel = formatHeadingLabel(locationPoint?.rawHeading);
+
+  if (!headingLabel) {
+    return `${locationText}. Direction unavailable on this device.`;
+  }
+
+  if (locationPoint.headingSource === "geolocation") {
+    return `${locationText}. Travel heading ${headingLabel}.`;
+  }
+
+  return `${locationText}. Facing ${headingLabel}.`;
+}
+
+function resetLocateStatusToBase() {
+  if (userLocationPoint) {
+    setLocateStatus(buildLocateStatusMessage(userLocationPoint), "success");
+    return;
+  }
+
+  setLocateStatus(DEFAULT_LOCATE_STATUS_MESSAGE, "muted");
+}
+
+function setPoiOverlayButtonState(active) {
+  if (!locateViaPoiBtn) {
+    return;
+  }
+
+  locateViaPoiBtn.classList.toggle("is-active", !!active);
+  locateViaPoiBtn.setAttribute("aria-pressed", String(!!active));
+}
+
+function setPoiLoadingState(loading) {
+  isLocatingViaPoi = !!loading;
+  if (locateViaPoiBtn) {
+    locateViaPoiBtn.disabled = !!loading;
+  }
+}
+
+function buildPoiOverlayStatus(buildingId, floorId) {
+  const poiMaps = poiMapsCache.get(buildingId);
+  const floorLabel = getFloorLabel(buildingId, floorId);
+
+  if (poiMaps === null) {
+    return {
+      message: `No poi.json found for ${getBuildingLabel(buildingId)}.`,
+      state: "warn",
+    };
+  }
+
+  const poiPoints = getPoiPointsForFloorFromMaps(poiMaps, floorId);
+  if (!poiPoints.length) {
+    return {
+      message: `No POIs defined for ${floorLabel}.`,
+      state: "warn",
+    };
+  }
+
+  return {
+    message: `Showing ${poiPoints.length} POI${poiPoints.length === 1 ? "" : "s"} on ${floorLabel}.`,
+    state: "success",
+  };
+}
+
+function getPoiAssetUrl(buildingId) {
+  if (buildingId === ROOT_BUILDING_ID) {
+    return "/assets/poi.json";
+  }
+
+  return `/assets/${encodeURIComponent(buildingId)}/poi.json`;
+}
+
+async function loadPoiMapsForBuilding(buildingId) {
+  if (!buildingId) {
+    return null;
+  }
+
+  if (poiMapsCache.has(buildingId)) {
+    return poiMapsCache.get(buildingId);
+  }
+
+  if (poiLoadPromises.has(buildingId)) {
+    return poiLoadPromises.get(buildingId);
+  }
+
+  const loadPromise = (async () => {
+    const response = await fetch(getPoiAssetUrl(buildingId), {
+      headers: { Accept: "application/json" },
+    });
+
+    if (response.status === 404) {
+      poiMapsCache.set(buildingId, null);
+      return null;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Could not load POIs for ${getBuildingLabel(buildingId)}.`);
+    }
+
+    const payload = await response.json().catch(() => {
+      throw new Error(`POI data for ${getBuildingLabel(buildingId)} is not valid JSON.`);
+    });
+    const normalized = normalizePoiMaps(payload);
+    poiMapsCache.set(buildingId, normalized);
+    return normalized;
+  })().finally(() => {
+    poiLoadPromises.delete(buildingId);
+  });
+
+  poiLoadPromises.set(buildingId, loadPromise);
+  return loadPromise;
+}
+
+function normalizePoiMaps(rawMaps) {
+  if (!rawMaps || typeof rawMaps !== "object" || Array.isArray(rawMaps)) {
+    return {};
+  }
+
+  const floorSource =
+    rawMaps.floors && typeof rawMaps.floors === "object" && !Array.isArray(rawMaps.floors) ? rawMaps.floors : rawMaps;
+
+  const normalized = {};
+  Object.entries(floorSource).forEach(([rawFloorId, floorPayload]) => {
+    const poiPoints = normalizePoiFloorPoints(floorPayload);
+    if (!poiPoints.length) {
+      return;
+    }
+
+    normalized[String(rawFloorId)] = poiPoints;
+  });
+
+  return normalized;
+}
+
+function normalizePoiFloorPoints(floorPayload) {
+  if (Array.isArray(floorPayload)) {
+    return floorPayload.map(normalizePoiPoint).filter((point) => point !== null);
+  }
+
+  if (!floorPayload || typeof floorPayload !== "object") {
+    return [];
+  }
+
+  const pointKeys = ["referencePoints", "points", "pois"];
+  for (const key of pointKeys) {
+    const rawPoints = floorPayload[key];
+    if (!Array.isArray(rawPoints)) {
+      continue;
+    }
+
+    return rawPoints.map(normalizePoiPoint).filter((point) => point !== null);
+  }
+
+  return [];
+}
+
+function normalizePoiPoint(rawPoint) {
+  if (!rawPoint || typeof rawPoint !== "object") {
+    return null;
+  }
+
+  const xPct = Number(rawPoint.xPct ?? rawPoint.x ?? rawPoint.xPercent);
+  const yPct = Number(rawPoint.yPct ?? rawPoint.y ?? rawPoint.yPercent);
+  const nameSource =
+    typeof rawPoint.name === "string" && rawPoint.name.trim()
+      ? rawPoint.name
+      : typeof rawPoint.label === "string" && rawPoint.label.trim()
+        ? rawPoint.label
+        : typeof rawPoint.title === "string" && rawPoint.title.trim()
+          ? rawPoint.title
+          : "";
+
+  if (!Number.isFinite(xPct) || !Number.isFinite(yPct) || !nameSource) {
+    return null;
+  }
+
+  return {
+    xPct: clampPercent(xPct),
+    yPct: clampPercent(yPct),
+    name: nameSource.trim(),
+  };
+}
+
+function getPoiPointsForFloor(buildingId, floorId) {
+  return getPoiPointsForFloorFromMaps(poiMapsCache.get(buildingId), floorId);
+}
+
+function getPoiPointsForFloorFromMaps(poiMaps, floorId) {
+  if (!poiMaps || typeof poiMaps !== "object" || !floorId) {
+    return [];
+  }
+
+  if (Array.isArray(poiMaps[floorId])) {
+    return poiMaps[floorId];
+  }
+
+  const loweredFloorId = String(floorId).toLowerCase();
+  for (const [candidateFloorId, points] of Object.entries(poiMaps)) {
+    if (String(candidateFloorId).toLowerCase() === loweredFloorId && Array.isArray(points)) {
+      return points;
+    }
+  }
+
+  return [];
 }
 
 function setPhotoLocationStatus(message, state) {

@@ -18,7 +18,8 @@ This project has been rewritten from a static site into a Django application wit
 - Display a different indoor map per selected building/floor.
 - Click any point on the map to select an indoor location.
 - Capture/upload an image and extract GPS metadata (if available).
-- Use the "Locate via GPS" button to convert the device location into map percentages (calibrated via `assets/<building>/gps-map.json`) and drop a pin on the current floor plan.
+- Use the "Locate via GPS" button to convert the device location into map percentages (calibrated via `assets/<building>/gps-map.json`), then show the current position and device direction on the floor plan when supported by the browser.
+- Use the "Locate via POI" button to show named points of interest from `assets/<building>/poi.json` on the current floor plan.
 - Save activity details (type, ID, timestamp, notes) with map point and/or photo GPS.
 - Persist records in Django database.
 - Search, delete, and export records as JSON.
@@ -32,9 +33,9 @@ This project has been rewritten from a static site into a Django application wit
 
 ## Database Setup
 
-For PostgreSQL setup, required tables, and SQLite-to-PostgreSQL data migration steps, see `POSTGRESQL_SETUP.md`.
+For PostgreSQL setup, required tables, and SQLite-to-PostgreSQL data migration steps, see [`POSTGRESQL_SETUP.md`](./POSTGRESQL_SETUP.md).
 
-For cloud deployment guidance for PostgreSQL and app configuration, see `database_cloud_setup.md`.
+For cloud deployment guidance for PostgreSQL and app configuration, see [`database_cloud_setup.md`](./database_cloud_setup.md).
 
 ## Requirements
 
@@ -98,6 +99,10 @@ python3 manage.py runserver
 
 `http://127.0.0.1:8000/`
 
+or
+
+`http://localhost:8000/`
+
 ## API Endpoints
 
 - `GET /api/buildings/` - returns discovered building/floor map metadata.
@@ -114,6 +119,24 @@ The server discovers maps in `assets/` using:
 2. filesystem scan of `assets/` directories/files.
 
 Additionally, optional `assets/<building>/gps-map.json` files can describe floor-level `referencePoints` (each with `xPct`, `yPct`, `latitude`, and `longitude`). The helper in `collector/locate_via_gps.py` uses those anchors to translate device GPS coordinates into map percentages for the Locate via GPS button.
+
+Each floor object may also include an optional `headingOffsetDeg` value. This offset is added to the device heading before drawing the direction arrow, which is useful when the floor plan image is not aligned to north.
+
+Optional `assets/<building>/poi.json` files can describe floor-level `referencePoints` for points of interest. Each POI entry should include `xPct`, `yPct`, and `name`, for example:
+
+```json
+{
+  "main-buildings": {
+    "referencePoints": [
+      {
+        "xPct": 10.13,
+        "yPct": 57.24,
+        "name": "Upper Changi MRT EXIT"
+      }
+    ]
+  }
+}
+```
 
 Supported map file extensions:
 
