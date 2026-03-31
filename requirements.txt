@@ -1,2 +1,4 @@
 Django>=5.0,<7.0
 psycopg[binary]>=3.1,<4.0
+django-storages[azure]>=1.14,<2.0
+azure-identity>=1.17,<2.0

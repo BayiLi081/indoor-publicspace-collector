@@ -1,17 +1,17 @@
 import { extractPhotoLocationFromImage, requestCurrentDeviceDirection, requestCurrentDeviceLocation } from "./image-location.js";
+import { loadActivityCatalog } from "./activity-catalog.js";
 
 const API_BUILDINGS = "/api/buildings/";
 const API_RECORDS = "/api/records/";
 const API_RECORDS_EXPORT = "/api/records/export/";
+const API_SITE_OBSERVATIONS = "/api/site-observations/";
 const DEFAULT_LOCATE_STATUS_MESSAGE = "Use Locate via GPS for your approximate spot, or Locate via POI to show named places.";
+const DEFAULT_OBSERVATION_STATUS_MESSAGE = "Site Observations";
 
 const ROOT_BUILDING_ID = "__root__";
 const DEFAULT_BUILDING_ID = "SUTD";
 const DEFAULT_FLOOR_ID = "main-buildings";
-const MAX_PREVIEW_BYTES = 100 * 1024;
 const MAX_PREVIEW_DATA_URL_LENGTH = 180000;
-const PREVIEW_MAX_DIMENSION = 240;
-const PREVIEW_MIN_DIMENSION = 56;
 const PREVIEW_DATA_URL_PATTERN = /^data:image\/(jpeg|jpg|png|webp);base64,[a-z0-9+/=]+$/i;
 const AUTO_ACTOR_ID_PATTERN = /^CL(\d+)-P(\d+)$/i;
 const MIN_MAP_ZOOM = 0.25;
@@ -19,22 +19,9 @@ const MAX_MAP_ZOOM = 8;
 const MAP_ZOOM_STEP = 0.1;
 const DEFAULT_MAP_ZOOM = 1;
 const WHEEL_ZOOM_SENSITIVITY = 0.0016;
-const ACTIVITY_TYPE_OPTIONS = [
-  "Walking",
-  "Strolling",
-  "Sitting",
-  "Standing",
-  "Talking",
-  "Queueing",
-  "Phone Calling",
-  "Smoking",
-  "Eating / Drinking",
-  "Running / Exercising",
-  "Others",
-];
-const ACTIVITY_TYPE_ALIASES = {
-  other: "Others",
-};
+const ACTIVITY_CATALOG = loadActivityCatalog();
+const ACTIVITY_TYPE_OPTIONS = ACTIVITY_CATALOG.options;
+const ACTIVITY_TYPE_ALIASES = ACTIVITY_CATALOG.aliases;
 
 const LEGACY_BUILDING_MAPS = {
   [ROOT_BUILDING_ID]: {
@@ -104,6 +91,17 @@ const groupPointSaveBtn = document.getElementById("groupPointSaveBtn");
 const groupPointActivityButtons = Array.from(document.querySelectorAll(".group-point-activity-btn"));
 const groupPointGenderButtons = Array.from(document.querySelectorAll(".group-point-gender-btn"));
 const groupPointAgeButtons = Array.from(document.querySelectorAll(".group-point-age-btn"));
+const observationCameraBtn = document.getElementById("observationCameraBtn");
+const observationNoteBtn = document.getElementById("observationNoteBtn");
+const observationStatus = document.getElementById("observationStatus");
+const observationPhotoInput = document.getElementById("observationPhotoInput");
+const observationModal = document.getElementById("observationModal");
+const observationForm = document.getElementById("observationForm");
+const observationContext = document.getElementById("observationContext");
+const observationNote = document.getElementById("observationNote");
+const observationPrompt = document.getElementById("observationPrompt");
+const observationCancelBtn = document.getElementById("observationCancelBtn");
+const observationSaveBtn = document.getElementById("observationSaveBtn");
 const poiMapsCache = new Map();
 const poiLoadPromises = new Map();
 
@@ -112,9 +110,9 @@ let selectedPoints = [];
 let draftGroupPoint = null;
 let selectedActivityTypes = [];
 let selectedGender = "";
+let selectedPhotoFile = null;
 let selectedPhotoLocation = null;
 let selectedPhotoName = "";
-let selectedPhotoPreviewDataUrl = "";
 let isPhotoLocationLoading = false;
 let buildingMaps = {};
 let currentBuildingId = "";
@@ -124,6 +122,7 @@ let currentClusterNumber = 0;
 let currentPersonNumber = 0;
 let lastGeneratedClusterNumber = 0;
 let savePromptTimerId = 0;
+let observationStatusTimerId = 0;
 let mapZoomLevel = DEFAULT_MAP_ZOOM;
 let userLocationPoint = null;
 let isLocatingViaGps = false;
@@ -139,6 +138,7 @@ let groupPointModalState = null;
 let groupPointSelectedActivityTypes = [];
 let groupPointSelectedGender = "";
 let groupPointSelectedAgeGroup = "";
+let isSavingObservation = false;
 
 initialize().catch((error) => {
   console.error("Initialization failed:", error);
@@ -149,6 +149,7 @@ async function initialize() {
   activityTime.value = toDateTimeLocalValue(new Date());
   setPhotoLocationStatus("No image selected.", "muted");
   setLocateStatus(DEFAULT_LOCATE_STATUS_MESSAGE, "muted");
+  setObservationStatus(DEFAULT_OBSERVATION_STATUS_MESSAGE, "muted");
   setPoiOverlayButtonState(false);
   setSavePrompt("", "muted");
 
@@ -223,6 +224,24 @@ async function initialize() {
   if (groupPointModal) {
     groupPointModal.addEventListener("click", onGroupPointModalClick);
   }
+  if (observationCameraBtn) {
+    observationCameraBtn.addEventListener("click", onObservationCameraClick);
+  }
+  if (observationNoteBtn) {
+    observationNoteBtn.addEventListener("click", onObservationNoteClick);
+  }
+  if (observationPhotoInput) {
+    observationPhotoInput.addEventListener("change", onObservationPhotoChange);
+  }
+  if (observationForm) {
+    observationForm.addEventListener("submit", onObservationFormSubmit);
+  }
+  if (observationCancelBtn) {
+    observationCancelBtn.addEventListener("click", () => closeObservationModal());
+  }
+  if (observationModal) {
+    observationModal.addEventListener("click", onObservationModalClick);
+  }
   groupPointActivityButtons.forEach((button) => {
     button.addEventListener("click", () => toggleGroupPointActivityType(button.dataset.groupPointActivityType || ""));
   });
@@ -242,6 +261,7 @@ async function initialize() {
   setRecordMode("");
 
   await loadBuildingMaps();
+  updateObservationContext();
   records = await loadRecords();
   lastGeneratedClusterNumber = getMaxKnownClusterNumber(records);
   renderMarkers();
@@ -290,6 +310,7 @@ function onBuildingChange(event) {
   currentBuildingId = event.target.value;
   renderFloorOptions(currentBuildingId);
   currentFloorId = floorSelect.value || "";
+  updateObservationContext();
   userLocationPoint = null;
   if (!poiVisible) {
     resetLocateStatusToBase();
@@ -305,6 +326,7 @@ function onBuildingChange(event) {
 
 function onFloorChange(event) {
   currentFloorId = event.target.value;
+  updateObservationContext();
   userLocationPoint = null;
   if (!poiVisible) {
     resetLocateStatusToBase();
@@ -372,6 +394,9 @@ function setCollectionActive(active) {
 }
 
 function setCollectStatus(message, state = "muted") {
+  if (!collectStatus) {
+    return;
+  }
   collectStatus.textContent = message;
   collectStatus.dataset.state = state;
 }
@@ -527,6 +552,10 @@ function isGroupPointModalOpen() {
   return !!groupPointModalState;
 }
 
+function isObservationModalOpen() {
+  return !!observationModal && !observationModal.hidden;
+}
+
 function isCompleteGroupPoint(point) {
   return (
     !!point &&
@@ -611,7 +640,7 @@ function openGroupPointModal(point, index = null) {
 
   groupPointModal.hidden = false;
   groupPointModal.setAttribute("aria-hidden", "false");
-  document.body.classList.add("modal-open");
+  syncModalOpenState();
 }
 
 function closeGroupPointModal({ discardDraft = false, keepStatus = false } = {}) {
@@ -624,16 +653,20 @@ function closeGroupPointModal({ discardDraft = false, keepStatus = false } = {})
   }
   groupPointModal.hidden = true;
   groupPointModal.setAttribute("aria-hidden", "true");
-  document.body.classList.remove("modal-open");
   groupPointModalState = null;
   setGroupPointSelectedActivityTypes([]);
   setGroupPointSelectedGender("");
   setGroupPointSelectedAgeGroup("");
   setGroupPointModalPrompt("", "muted");
+  syncModalOpenState();
   if (!keepStatus && isCollecting && isGroupMode()) {
     setCollectStatus(getGroupCaptureProgressMessage(), "active");
   }
   renderMarkers();
+}
+
+function syncModalOpenState() {
+  document.body.classList.toggle("modal-open", isGroupPointModalOpen() || isObservationModalOpen());
 }
 
 function setGroupPointModalPrompt(message, state = "muted") {
@@ -1061,6 +1094,11 @@ function onGroupPointModalClick(event) {
 }
 
 function onDocumentKeyDown(event) {
+  if (event.key === "Escape" && isObservationModalOpen()) {
+    closeObservationModal();
+    return;
+  }
+
   if (event.key === "Escape" && isGroupPointModalOpen()) {
     onGroupPointCancel();
   }
@@ -1156,51 +1194,287 @@ function onGroupPointFormSubmit(event) {
   renderMarkers();
 }
 
+function onObservationModalClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (target.hasAttribute("data-observation-close")) {
+    closeObservationModal();
+  }
+}
+
+function onObservationCameraClick() {
+  if (!observationPhotoInput || isSavingObservation) {
+    return;
+  }
+
+  if (isGroupPointModalOpen()) {
+    setObservationStatus("Finish the open group member popup before saving a site observation.", "warn");
+    return;
+  }
+
+  if (isObservationModalOpen()) {
+    closeObservationModal({ preserveNote: true });
+  }
+
+  observationPhotoInput.click();
+}
+
+function onObservationNoteClick() {
+  if (isSavingObservation) {
+    return;
+  }
+
+  if (isGroupPointModalOpen()) {
+    setObservationStatus("Finish the open group member popup before saving a site observation.", "warn");
+    return;
+  }
+
+  if (isObservationModalOpen()) {
+    observationNote?.focus();
+    return;
+  }
+
+  openObservationModal();
+}
+
+function openObservationModal() {
+  if (!observationModal) {
+    return;
+  }
+
+  updateObservationContext();
+  setObservationPrompt("", "muted");
+  observationModal.hidden = false;
+  observationModal.setAttribute("aria-hidden", "false");
+  syncModalOpenState();
+  observationNote?.focus();
+}
+
+function closeObservationModal({ preserveNote = false } = {}) {
+  if (!observationModal) {
+    return;
+  }
+
+  if (!preserveNote && observationNote) {
+    observationNote.value = "";
+  }
+  setObservationPrompt("", "muted");
+  observationModal.hidden = true;
+  observationModal.setAttribute("aria-hidden", "true");
+  syncModalOpenState();
+}
+
+async function onObservationFormSubmit(event) {
+  event.preventDefault();
+
+  if (isSavingObservation) {
+    return;
+  }
+
+  const noteText = observationNote?.value.trim() || "";
+  if (!noteText) {
+    setObservationPrompt("Enter a note before saving.", "error");
+    return;
+  }
+
+  const createdObservation = await saveSiteObservation({
+    observationType: "note",
+    noteText,
+  });
+  if (createdObservation) {
+    closeObservationModal();
+  }
+}
+
+async function onObservationPhotoChange(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+
+  if (!file || isSavingObservation) {
+    return;
+  }
+
+  await saveSiteObservation({
+    observationType: "photo",
+    file,
+  });
+}
+
+async function saveSiteObservation({ observationType, noteText = "", file = null }) {
+  setObservationActionState(true);
+  if (observationType === "note") {
+    setObservationPrompt("Saving site observation...", "muted");
+    setObservationStatus("Saving site observation note...", "muted");
+  } else {
+    setObservationStatus("Preparing site observation photo...", "muted");
+  }
+
+  try {
+    const photoData = file ? await buildPhotoCaptureState(file, setObservationStatus) : null;
+    const response = await apiRequest(API_SITE_OBSERVATIONS, {
+      method: "POST",
+      body: buildRequestBodyWithOptionalPhoto(
+        buildSiteObservationPayload({
+          observationType,
+          noteText,
+          photoData,
+        }),
+        file
+      ),
+    });
+
+    if (!response.ok) {
+      throw new Error(await parseApiError(response));
+    }
+
+    const data = await response.json();
+    if (!data?.observation) {
+      throw new Error("Server did not return the created observation.");
+    }
+
+    const successMessage =
+      observationType === "photo" ? "Site observation photo saved." : "Site observation note saved.";
+    setObservationStatus(successMessage, "success");
+    if (observationType === "note") {
+      setObservationPrompt(successMessage, "success");
+    }
+    return data.observation;
+  } catch (error) {
+    const errorMessage = `Could not save site observation: ${error.message}`;
+    setObservationStatus(errorMessage, "error");
+    if (observationType === "note") {
+      setObservationPrompt(errorMessage, "error");
+    }
+    alert(errorMessage);
+    return null;
+  } finally {
+    setObservationActionState(false);
+  }
+}
+
+function buildSiteObservationPayload({ observationType, noteText = "", photoData = null }) {
+  return {
+    buildingId: currentBuildingId || null,
+    floorId: currentFloorId || null,
+    observationType,
+    observationTime: new Date().toISOString(),
+    note: noteText || null,
+    photoName: photoData?.photoName || null,
+    photoLocation: photoData?.photoLocation ? { ...photoData.photoLocation } : null,
+  };
+}
+
+function updateObservationContext() {
+  if (!observationContext) {
+    return;
+  }
+
+  if (currentBuildingId && currentFloorId) {
+    observationContext.textContent = `${getBuildingLabel(currentBuildingId)} / ${getFloorLabel(currentBuildingId, currentFloorId)}.`;
+    return;
+  }
+
+  if (currentBuildingId) {
+    observationContext.textContent = `${getBuildingLabel(currentBuildingId)}. Observation will be saved without a floor.`;
+    return;
+  }
+
+  observationContext.textContent = "No building or floor selected. Observation will be saved without map context.";
+}
+
+function setObservationActionState(busy) {
+  isSavingObservation = !!busy;
+  if (observationCameraBtn) {
+    observationCameraBtn.disabled = !!busy;
+  }
+  if (observationNoteBtn) {
+    observationNoteBtn.disabled = !!busy;
+  }
+  if (observationSaveBtn) {
+    observationSaveBtn.disabled = !!busy;
+  }
+  if (observationCancelBtn) {
+    observationCancelBtn.disabled = !!busy;
+  }
+  if (observationPhotoInput) {
+    observationPhotoInput.disabled = !!busy;
+  }
+}
+
+async function buildPhotoCaptureState(file, setStatus) {
+  if (!(file instanceof File)) {
+    throw new Error("No image selected.");
+  }
+
+  setStatus("Preparing image metadata...", "muted");
+
+  let photoLocation = null;
+  setStatus("Reading GPS metadata from image...", "muted");
+
+  try {
+    const extractedLocation = await extractPhotoLocationFromImage(file);
+    photoLocation = extractedLocation;
+
+    if (!extractedLocation) {
+      setStatus("No EXIF GPS found. Requesting current device location...", "muted");
+      try {
+        const fallbackLocation = await requestCurrentDeviceLocation();
+        photoLocation = fallbackLocation;
+        const fallbackText = `${formatCoordinate(fallbackLocation.latitude)}, ${formatCoordinate(
+          fallbackLocation.longitude
+        )}`;
+        setStatus(`EXIF missing. Using current device location: ${fallbackText}`, "success");
+      } catch (fallbackError) {
+        const fallbackMessage =
+          fallbackError && typeof fallbackError.message === "string" && fallbackError.message
+            ? fallbackError.message
+            : "Could not get current device location.";
+        setStatus(`Image selected, but GPS was unavailable: ${fallbackMessage}`, "warn");
+      }
+
+      return {
+        photoName: file.name,
+        photoLocation,
+      };
+    }
+
+    const gpsText = `${formatCoordinate(extractedLocation.latitude)}, ${formatCoordinate(
+      extractedLocation.longitude
+    )}`;
+    setStatus(`GPS found: ${gpsText}`, "success");
+  } catch (error) {
+    setStatus(`Could not read photo GPS: ${error.message}`, "error");
+  }
+
+  return {
+    photoName: file.name,
+    photoLocation,
+  };
+}
+
 async function onPhotoChange(event) {
   const file = event.target.files?.[0];
+  selectedPhotoFile = null;
   selectedPhotoLocation = null;
   selectedPhotoName = "";
-  selectedPhotoPreviewDataUrl = "";
 
   if (!file) {
     setPhotoLocationStatus("No image selected.", "muted");
     return;
   }
 
-  selectedPhotoName = file.name;
-  selectedPhotoPreviewDataUrl = await createPhotoPreviewDataUrl(file);
+  selectedPhotoFile = file;
   isPhotoLocationLoading = true;
-  setPhotoLocationStatus("Reading GPS metadata from image...", "muted");
 
   try {
-    const extractedLocation = await extractPhotoLocationFromImage(file);
-    selectedPhotoLocation = extractedLocation;
-
-    if (!extractedLocation) {
-      setPhotoLocationStatus("No EXIF GPS found. Requesting current device location...", "muted");
-      try {
-        const fallbackLocation = await requestCurrentDeviceLocation();
-        selectedPhotoLocation = fallbackLocation;
-        const fallbackText = `${formatCoordinate(fallbackLocation.latitude)}, ${formatCoordinate(
-          fallbackLocation.longitude
-        )}`;
-        setPhotoLocationStatus(`EXIF missing. Using current device location: ${fallbackText}`, "success");
-      } catch (fallbackError) {
-        const fallbackMessage =
-          fallbackError && typeof fallbackError.message === "string" && fallbackError.message
-            ? fallbackError.message
-            : "Could not get current device location.";
-        setPhotoLocationStatus(`Image selected, but GPS was unavailable: ${fallbackMessage}`, "warn");
-      }
-      return;
-    }
-
-    const gpsText = `${formatCoordinate(extractedLocation.latitude)}, ${formatCoordinate(
-      extractedLocation.longitude
-    )}`;
-    setPhotoLocationStatus(`GPS found: ${gpsText}`, "success");
+    const photoData = await buildPhotoCaptureState(file, setPhotoLocationStatus);
+    selectedPhotoLocation = photoData.photoLocation;
+    selectedPhotoName = photoData.photoName;
   } catch (error) {
-    setPhotoLocationStatus(`Could not read photo GPS: ${error.message}`, "error");
+    setPhotoLocationStatus(error?.message || "Could not prepare the selected image.", "error");
   } finally {
     isPhotoLocationLoading = false;
   }
@@ -1446,7 +1720,7 @@ async function onFormSubmit(event) {
       );
       const response = await apiRequest(API_RECORDS, {
         method: "POST",
-        body: { records: payloads },
+        body: buildRequestBodyWithOptionalPhoto({ records: payloads }, selectedPhotoFile),
       });
 
       if (!response.ok) {
@@ -1467,7 +1741,10 @@ async function onFormSubmit(event) {
     } else {
       const response = await apiRequest(API_RECORDS, {
         method: "POST",
-        body: buildRecordPayload(selectedPoints[0], autoActorId, fallbackActivityTime),
+        body: buildRequestBodyWithOptionalPhoto(
+          buildRecordPayload(selectedPoints[0], autoActorId, fallbackActivityTime),
+          selectedPhotoFile
+        ),
       });
 
       if (!response.ok) {
@@ -1507,8 +1784,7 @@ function buildRecordPayload(point, actorIdValue, fallbackActivityTime, overrides
     activityTime: safeActivityTime,
     notes: notes.value.trim(),
     location: point ? { xPct: point.xPct, yPct: point.yPct } : null,
-    photoName: selectedPhotoName || null,
-    photoPreview: selectedPhotoPreviewDataUrl || null,
+    photoName: selectedPhotoName || selectedPhotoFile?.name || null,
     photoLocation: selectedPhotoLocation ? { ...selectedPhotoLocation } : null,
   };
 }
@@ -1545,6 +1821,17 @@ function getDownloadFilename(contentDispositionHeader) {
   return `indoor-activity-records-${new Date().toISOString().slice(0, 10)}.json`;
 }
 
+function buildRequestBodyWithOptionalPhoto(payload, photoFile) {
+  if (!(photoFile instanceof File)) {
+    return payload;
+  }
+
+  const formData = new FormData();
+  formData.append("payload", JSON.stringify(payload));
+  formData.append("photo", photoFile);
+  return formData;
+}
+
 function resetForm(resetDateTime = true, advanceActorId = false) {
   const previousActorId = actorId.value;
   const previousRecordMode = recordMode.value;
@@ -1557,9 +1844,9 @@ function resetForm(resetDateTime = true, advanceActorId = false) {
   setSelectedActivityTypes([]);
   setSelectedGender("");
   setSelectedAgeGroup("");
+  selectedPhotoFile = null;
   selectedPhotoLocation = null;
   selectedPhotoName = "";
-  selectedPhotoPreviewDataUrl = "";
   isPhotoLocationLoading = false;
   photoInput.value = "";
   setPhotoLocationStatus("No image selected.", "muted");
@@ -1918,7 +2205,7 @@ function renderRecords() {
       <td>${escapeHtml(getBuildingLabel(recordBuildingId))}</td>
       <td>${escapeHtml(getFloorLabel(recordBuildingId, recordFloorId))}</td>
       <td>${escapeHtml(formatMapLocation(record.location))}</td>
-      <td>${formatPhotoPreviewCell(record.photoPreview, record.photoName)}</td>
+      <td>${formatPhotoPreviewCell(record.photoUrl, record.photoPreview, record.photoName)}</td>
       <td>${escapeHtml(formatPhotoLocationText(record.photoLocation, record.photoName))}</td>
       <td>${escapeHtml(record.notes || "-")}</td>
       <td><button type="button" class="danger" data-delete-id="${record.id}">Delete</button></td>
@@ -1957,6 +2244,7 @@ function normalizeRecord(record) {
     location: hasMapLocation(record.location) ? { ...record.location } : null,
     photoLocation: isValidPhotoLocation(record.photoLocation) ? { ...record.photoLocation } : null,
     photoName: typeof record.photoName === "string" && record.photoName.trim() ? record.photoName : null,
+    photoUrl: normalizePhotoUrl(record.photoUrl),
     photoPreview: normalizePhotoPreview(record.photoPreview),
   };
 }
@@ -2215,14 +2503,35 @@ function normalizeAgeGroup(value) {
   return normalized || null;
 }
 
-function formatPhotoPreviewCell(photoPreview, photoName) {
-  const normalizedPreview = normalizePhotoPreview(photoPreview);
-  if (!normalizedPreview) {
+function formatPhotoPreviewCell(photoUrl, photoPreview, photoName) {
+  const imageSource = normalizePhotoUrl(photoUrl) || normalizePhotoPreview(photoPreview);
+  if (!imageSource) {
     return "-";
   }
 
   const altText = escapeHtml(photoName ? `${photoName} preview` : "Photo preview");
-  return `<img class="record-photo-preview" src="${normalizedPreview}" alt="${altText}" loading="lazy" decoding="async">`;
+  return `<img class="record-photo-preview" src="${imageSource}" alt="${altText}" loading="lazy" decoding="async">`;
+}
+
+function normalizePhotoUrl(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (
+    normalized.startsWith("/") ||
+    normalized.startsWith("http://") ||
+    normalized.startsWith("https://")
+  ) {
+    return normalized;
+  }
+
+  return null;
 }
 
 function normalizePhotoPreview(value) {
@@ -2244,100 +2553,6 @@ function normalizePhotoPreview(value) {
   }
 
   return normalized;
-}
-
-async function createPhotoPreviewDataUrl(file) {
-  if (!(file instanceof File)) {
-    return "";
-  }
-
-  let image;
-  try {
-    image = await loadImageFromFile(file);
-  } catch {
-    return "";
-  }
-
-  let targetWidth = image.naturalWidth || image.width;
-  let targetHeight = image.naturalHeight || image.height;
-  if (!targetWidth || !targetHeight) {
-    return "";
-  }
-
-  const sizeScale = Math.min(1, PREVIEW_MAX_DIMENSION / Math.max(targetWidth, targetHeight));
-  targetWidth = Math.max(1, Math.round(targetWidth * sizeScale));
-  targetHeight = Math.max(1, Math.round(targetHeight * sizeScale));
-
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d", { alpha: false });
-  if (!context) {
-    return "";
-  }
-
-  let bestAttempt = "";
-  for (let resizeAttempt = 0; resizeAttempt < 5; resizeAttempt += 1) {
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
-    context.clearRect(0, 0, targetWidth, targetHeight);
-    context.drawImage(image, 0, 0, targetWidth, targetHeight);
-
-    for (let quality = 0.82; quality >= 0.35; quality -= 0.12) {
-      const dataUrl = canvas.toDataURL("image/jpeg", quality);
-      const byteSize = estimateDataUrlByteSize(dataUrl);
-      if (byteSize <= MAX_PREVIEW_BYTES) {
-        return dataUrl;
-      }
-      bestAttempt = dataUrl;
-    }
-
-    const nextWidth = Math.max(PREVIEW_MIN_DIMENSION, Math.round(targetWidth * 0.82));
-    const nextHeight = Math.max(PREVIEW_MIN_DIMENSION, Math.round(targetHeight * 0.82));
-    if (nextWidth === targetWidth && nextHeight === targetHeight) {
-      break;
-    }
-
-    targetWidth = nextWidth;
-    targetHeight = nextHeight;
-  }
-
-  if (bestAttempt && estimateDataUrlByteSize(bestAttempt) <= MAX_PREVIEW_BYTES) {
-    return bestAttempt;
-  }
-  return "";
-}
-
-function loadImageFromFile(file) {
-  return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const image = new Image();
-
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(image);
-    };
-
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("Could not decode image file."));
-    };
-
-    image.src = objectUrl;
-  });
-}
-
-function estimateDataUrlByteSize(dataUrl) {
-  if (typeof dataUrl !== "string") {
-    return 0;
-  }
-
-  const commaIndex = dataUrl.indexOf(",");
-  if (commaIndex < 0) {
-    return 0;
-  }
-
-  const base64 = dataUrl.slice(commaIndex + 1);
-  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
-  return Math.floor((base64.length * 3) / 4) - padding;
 }
 
 function toDateTimeLocalValue(date) {
@@ -2607,6 +2822,35 @@ function setPhotoLocationStatus(message, state) {
   photoLocationStatus.dataset.state = state;
 }
 
+function setObservationPrompt(message, state = "muted") {
+  if (!observationPrompt) {
+    return;
+  }
+
+  observationPrompt.textContent = message;
+  observationPrompt.dataset.state = state;
+}
+
+function setObservationStatus(message, state = "muted") {
+  if (!observationStatus) {
+    return;
+  }
+
+  observationStatus.textContent = message;
+  observationStatus.dataset.state = state;
+
+  if (observationStatusTimerId) {
+    window.clearTimeout(observationStatusTimerId);
+    observationStatusTimerId = 0;
+  }
+
+  if (state === "success" && message) {
+    observationStatusTimerId = window.setTimeout(() => {
+      setObservationStatus(DEFAULT_OBSERVATION_STATUS_MESSAGE, "muted");
+    }, 2600);
+  }
+}
+
 function setLocateStatus(message, state = "muted") {
   if (!locateStatus) {
     return;
@@ -2709,8 +2953,10 @@ async function apiRequest(url, { method = "GET", body = null } = {}) {
     Accept: "application/json",
   };
 
-  let payload;
-  if (body !== null) {
+  let payload = null;
+  if (body instanceof FormData) {
+    payload = body;
+  } else if (body !== null) {
     headers["Content-Type"] = "application/json";
     payload = JSON.stringify(body);
   }

@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -21,6 +23,30 @@ def env_str(name: str, default: str) -> str:
   if value is None:
     return default
   return value.strip()
+
+
+def env_int(name: str, default: int) -> int:
+  value = os.getenv(name)
+  if value is None:
+    return default
+
+  stripped = value.strip()
+  if not stripped:
+    return default
+
+  return int(stripped)
+
+
+def env_optional_int(name: str) -> int | None:
+  value = os.getenv(name)
+  if value is None:
+    return None
+
+  stripped = value.strip()
+  if not stripped:
+    return None
+
+  return int(stripped)
 
 
 def build_db_options() -> dict[str, str]:
@@ -121,6 +147,97 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "collector" / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+MEDIA_URL = env_str("DJANGO_MEDIA_URL", "/media/")
+MEDIA_ROOT = Path(env_str("DJANGO_MEDIA_ROOT", str(BASE_DIR / "media")))
+OBJECT_STORAGE_PREFIX = env_str("DJANGO_OBJECT_STORAGE_PREFIX", "objects")
+OBJECT_STORAGE_BACKEND = env_str("DJANGO_OBJECT_STORAGE_BACKEND", "django.core.files.storage.FileSystemStorage")
+AZURE_CONNECTION_STRING = env_str("AZURE_CONNECTION_STRING", "")
+AZURE_ACCOUNT_NAME = env_str("AZURE_ACCOUNT_NAME", "")
+AZURE_ACCOUNT_KEY = env_str("AZURE_ACCOUNT_KEY", "")
+AZURE_CONTAINER = env_str("AZURE_CONTAINER", "")
+AZURE_SAS_TOKEN = env_str("AZURE_SAS_TOKEN", "")
+AZURE_CUSTOM_DOMAIN = env_str("AZURE_CUSTOM_DOMAIN", "")
+AZURE_ENDPOINT_SUFFIX = env_str("AZURE_ENDPOINT_SUFFIX", "core.windows.net")
+AZURE_LOCATION = env_str("AZURE_LOCATION", "")
+AZURE_CACHE_CONTROL = env_str("AZURE_CACHE_CONTROL", "")
+AZURE_SSL = env_bool("AZURE_SSL", True)
+AZURE_OVERWRITE_FILES = env_bool("AZURE_OVERWRITE_FILES", False)
+AZURE_USE_MANAGED_IDENTITY = env_bool("AZURE_USE_MANAGED_IDENTITY", False)
+AZURE_MANAGED_IDENTITY_CLIENT_ID = env_str("AZURE_MANAGED_IDENTITY_CLIENT_ID", "")
+AZURE_UPLOAD_MAX_CONN = env_int("AZURE_UPLOAD_MAX_CONN", 2)
+AZURE_CONNECTION_TIMEOUT_SECS = env_int("AZURE_CONNECTION_TIMEOUT_SECS", 20)
+AZURE_BLOB_MAX_MEMORY_SIZE = env_int("AZURE_BLOB_MAX_MEMORY_SIZE", 2 * 1024 * 1024)
+AZURE_URL_EXPIRATION_SECS = env_optional_int("AZURE_URL_EXPIRATION_SECS")
+DEFAULT_STORAGE_OPTIONS = {}
+if OBJECT_STORAGE_BACKEND == "django.core.files.storage.FileSystemStorage":
+  DEFAULT_STORAGE_OPTIONS = {
+    "location": str(MEDIA_ROOT),
+    "base_url": MEDIA_URL,
+  }
+elif OBJECT_STORAGE_BACKEND == "storages.backends.azure_storage.AzureStorage":
+  if not AZURE_CONTAINER:
+    raise ImproperlyConfigured(
+      "AZURE_CONTAINER is required when DJANGO_OBJECT_STORAGE_BACKEND uses AzureStorage."
+    )
+
+  DEFAULT_STORAGE_OPTIONS = {
+    "azure_container": AZURE_CONTAINER,
+    "azure_ssl": AZURE_SSL,
+    "upload_max_conn": AZURE_UPLOAD_MAX_CONN,
+    "timeout": AZURE_CONNECTION_TIMEOUT_SECS,
+    "max_memory_size": AZURE_BLOB_MAX_MEMORY_SIZE,
+    "overwrite_files": AZURE_OVERWRITE_FILES,
+  }
+
+  if AZURE_CONNECTION_STRING:
+    DEFAULT_STORAGE_OPTIONS["connection_string"] = AZURE_CONNECTION_STRING
+  elif AZURE_ACCOUNT_NAME and AZURE_ACCOUNT_KEY:
+    DEFAULT_STORAGE_OPTIONS["account_name"] = AZURE_ACCOUNT_NAME
+    DEFAULT_STORAGE_OPTIONS["account_key"] = AZURE_ACCOUNT_KEY
+  elif AZURE_USE_MANAGED_IDENTITY and AZURE_ACCOUNT_NAME:
+    try:
+      from azure.identity import DefaultAzureCredential
+    except ImportError as exc:
+      raise ImproperlyConfigured(
+        "azure-identity must be installed when AZURE_USE_MANAGED_IDENTITY=True."
+      ) from exc
+
+    credential_options = {}
+    if AZURE_MANAGED_IDENTITY_CLIENT_ID:
+      credential_options["managed_identity_client_id"] = AZURE_MANAGED_IDENTITY_CLIENT_ID
+
+    DEFAULT_STORAGE_OPTIONS["account_name"] = AZURE_ACCOUNT_NAME
+    DEFAULT_STORAGE_OPTIONS["token_credential"] = DefaultAzureCredential(**credential_options)
+  elif AZURE_SAS_TOKEN and AZURE_ACCOUNT_NAME:
+    DEFAULT_STORAGE_OPTIONS["account_name"] = AZURE_ACCOUNT_NAME
+    DEFAULT_STORAGE_OPTIONS["sas_token"] = AZURE_SAS_TOKEN
+  else:
+    raise ImproperlyConfigured(
+      "AzureStorage requires AZURE_CONNECTION_STRING, AZURE_ACCOUNT_NAME/AZURE_ACCOUNT_KEY, "
+      "AZURE_SAS_TOKEN with AZURE_ACCOUNT_NAME, or AZURE_USE_MANAGED_IDENTITY=True with AZURE_ACCOUNT_NAME."
+    )
+
+  if AZURE_CUSTOM_DOMAIN:
+    DEFAULT_STORAGE_OPTIONS["custom_domain"] = AZURE_CUSTOM_DOMAIN
+  if AZURE_ENDPOINT_SUFFIX:
+    DEFAULT_STORAGE_OPTIONS["endpoint_suffix"] = AZURE_ENDPOINT_SUFFIX
+  if AZURE_LOCATION:
+    DEFAULT_STORAGE_OPTIONS["location"] = AZURE_LOCATION
+  if AZURE_CACHE_CONTROL:
+    DEFAULT_STORAGE_OPTIONS["cache_control"] = AZURE_CACHE_CONTROL
+  if AZURE_URL_EXPIRATION_SECS is not None:
+    DEFAULT_STORAGE_OPTIONS["expiration_secs"] = AZURE_URL_EXPIRATION_SECS
+
+STORAGES = {
+  "default": {
+    "BACKEND": OBJECT_STORAGE_BACKEND,
+    **({"OPTIONS": DEFAULT_STORAGE_OPTIONS} if DEFAULT_STORAGE_OPTIONS else {}),
+  },
+  "staticfiles": {
+    "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+  },
+}
 
 ASSETS_DIR = BASE_DIR / "assets"
 SYNC_BUILDINGS_ON_MIGRATE = env_bool("DJANGO_SYNC_BUILDINGS_ON_MIGRATE", True)

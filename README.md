@@ -43,6 +43,7 @@ This project has been rewritten from a static site into a Django application wit
 - Use the "Locate via GPS" button to convert the device location into map percentages (calibrated via `assets/<building>/gps-map.json`), then show the current position and device direction on the floor plan when supported by the browser.
 - Use the "Locate via POI" button to show named points of interest from `assets/<building>/poi.json` on the current floor plan.
 - Save activity details (type, ID, timestamp, notes) with map point and/or photo GPS.
+- Save quick site observations from the floating camera or note buttons without mixing them into the structured activity survey dataset.
 
 - Persist records in Django database.
 - Search, delete, and export records as JSON.
@@ -126,11 +127,71 @@ or
 
 `http://localhost:8000/`
 
+## Azure Blob Storage Deployment
+
+The app now stores uploaded images through Django's `default` storage backend, so you can switch the upload path from local filesystem storage to Azure Blob Storage without changing the upload code.
+
+This repository already includes the Azure storage dependencies in `requirements.txt`. After updating your Azure App Service deployment, configure Blob Storage like this:
+
+1. Create a blob container in your Azure Storage account.
+   Use one container such as `media`. This app already separates uploads internally with object paths like `objects/activity-records/...` and `objects/site-observations/...`.
+2. Open your Azure App Service in the Azure portal and go to `Settings` -> `Environment variables`.
+   App Service injects these values as environment variables and restarts the app when they change.
+3. Add the base storage settings:
+
+```text
+DJANGO_DEBUG=False
+DJANGO_ALLOWED_HOSTS=<your-app>.azurewebsites.net,<your-custom-domain>
+DJANGO_CSRF_TRUSTED_ORIGINS=https://<your-app>.azurewebsites.net,https://<your-custom-domain>
+DJANGO_OBJECT_STORAGE_BACKEND=storages.backends.azure_storage.AzureStorage
+DJANGO_OBJECT_STORAGE_PREFIX=objects
+AZURE_CONTAINER=media
+AZURE_ACCOUNT_NAME=<your-storage-account-name>
+```
+
+4. Choose one authentication method.
+
+Recommended: Managed identity
+Enable the system-assigned managed identity on the App Service, then grant that identity the `Storage Blob Data Contributor` role on the storage account.
+
+```text
+AZURE_USE_MANAGED_IDENTITY=True
+AZURE_URL_EXPIRATION_SECS=3600
+```
+
+Optional:
+If you use a user-assigned managed identity, also set `AZURE_MANAGED_IDENTITY_CLIENT_ID=<client-id>`.
+
+Alternative: Connection string
+If you prefer account-key-based access, keep managed identity off and set:
+
+```text
+AZURE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=<account>;AccountKey=<key>;EndpointSuffix=core.windows.net
+```
+
+5. Optional Azure Blob settings:
+
+```text
+AZURE_CUSTOM_DOMAIN=<cdn-or-custom-domain>
+AZURE_CACHE_CONTROL=public,max-age=31536000,immutable
+AZURE_OVERWRITE_FILES=False
+```
+
+6. Save the App Service settings and restart the app if Azure has not already restarted it automatically.
+7. Run migrations on the deployed app if needed, then upload a test photo from the site.
+
+Notes:
+- This setup changes uploaded image storage only. Static files are still handled separately by Django/App Service.
+- If your blob container is private, keep `AZURE_URL_EXPIRATION_SECS` set so generated image links are signed and time-limited.
+- The Azure storage backend does not create containers automatically, so create `media` before testing uploads.
+
 ## API Endpoints
 
 - `GET /api/buildings/` - returns discovered building/floor map metadata.
 - `GET /api/records/` - list records.
 - `POST /api/records/` - create a record.
+- `GET /api/site-observations/` - list saved site observations.
+- `POST /api/site-observations/` - create a site observation note or photo entry.
 - `DELETE /api/records/<uuid>/` - delete a record.
 - `GET /api/records/export/` - download all records as JSON.
 
@@ -172,6 +233,9 @@ Supported map file extensions:
 ## Notes
 
 - Photo GPS extraction still uses `exifr` from jsDelivr in the browser.
+- Uploaded images now go through Django's default storage backend instead of being stored only as base64 preview data in the database.
+- Local development uses filesystem-backed object storage under `media/objects/...`, so local testing already follows an object-store-style path layout.
+- Azure Blob Storage is supported through `storages.backends.azure_storage.AzureStorage` plus App Service environment variables.
 - For production, serve static files and `/assets/` through your web server (Nginx/Apache/CDN) rather than Django's development server.
 
 ## Troubleshooting

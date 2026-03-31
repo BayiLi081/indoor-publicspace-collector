@@ -16,30 +16,21 @@ from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
 
+from .activity_catalog import (
+  ACTIVITY_TYPE_ALIASES,
+  ACTIVITY_TYPE_OPTIONS,
+  build_activity_catalog_payload,
+)
 from .building_catalog import discover_building_maps as discover_building_maps_catalog
 from .floorplan_svg import convert_jpg_floorplan_to_svg, should_regenerate_jpg_wrapper
 from .locate_via_gps import GPSMappingError, get_floor_heading_offset, locate_map_point_from_gps
-from .models import ActivityRecord
+from .models import ActivityRecord, SiteObservation
+from .object_storage import build_image_object_url, delete_image_object, save_uploaded_image_object
 
 ROOT_BUILDING_ID = "__root__"
 MAP_EXTENSIONS = {".svg", ".png", ".jpg", ".jpeg", ".webp"}
 MAX_PHOTO_PREVIEW_LENGTH = 180_000
-ALLOWED_ACTIVITY_TYPES = (
-  "Walking",
-  "Strolling",
-  "Sitting",
-  "Standing",
-  "Talking",
-  "Queueing",
-  "Phone Calling",
-  "Smoking",
-  "Eating / Drinking",
-  "Running / Exercising",
-  "Others",
-)
-ACTIVITY_TYPE_ALIASES = {
-  "other": "Others",
-}
+ALLOWED_OBSERVATION_TYPES = {"photo", "note"}
 ALLOWED_GENDERS = {"male", "female"}
 ALLOWED_AGE_GROUPS = {
   "<10 years old",
@@ -58,12 +49,12 @@ MAP_EXTENSION_PRIORITY = {
 
 @ensure_csrf_cookie
 def index(request: HttpRequest) -> HttpResponse:
-  return render(request, "collector/index.html", {"active_page": "capture"})
+  return render(request, "collector/index.html", build_page_context("capture"))
 
 
 @ensure_csrf_cookie
 def management(request: HttpRequest) -> HttpResponse:
-  return render(request, "collector/management.html", {"active_page": "management"})
+  return render(request, "collector/management.html", build_page_context("management"))
 
 
 @require_http_methods(["GET"])
@@ -135,11 +126,15 @@ def api_records(request: HttpRequest) -> JsonResponse:
     except DatabaseError as exc:
       return database_error_response(exc)
 
-  payload, error_response = parse_json_request(request)
+  payload, uploaded_photo, error_response = parse_request_payload(request)
   if error_response:
     return error_response
 
+  uploaded_photo_object_name = ""
   try:
+    if uploaded_photo is not None:
+      uploaded_photo_object_name = save_uploaded_image_object(uploaded_photo, "activity-records")
+
     batch_payload = payload.get("records")
     if batch_payload is not None:
       if not isinstance(batch_payload, list) or not batch_payload:
@@ -150,7 +145,11 @@ def api_records(request: HttpRequest) -> JsonResponse:
         if not isinstance(item, dict):
           raise ValidationError({"records": ["Each record payload must be an object."]})
 
-        record = build_record_from_payload(item)
+        record = build_record_from_payload(
+          item,
+          fallback_photo_object_name=uploaded_photo_object_name,
+          fallback_photo_name=uploaded_photo.name if uploaded_photo is not None else "",
+        )
         record.full_clean()
         records.append(record)
 
@@ -158,12 +157,18 @@ def api_records(request: HttpRequest) -> JsonResponse:
         for record in records:
           record.save()
     else:
-      record = build_record_from_payload(payload)
+      record = build_record_from_payload(
+        payload,
+        fallback_photo_object_name=uploaded_photo_object_name,
+        fallback_photo_name=uploaded_photo.name if uploaded_photo is not None else "",
+      )
       record.full_clean()
       record.save()
   except DatabaseError as exc:
+    delete_image_object_if_unused(uploaded_photo_object_name)
     return database_error_response(exc)
   except ValidationError as exc:
+    delete_image_object_if_unused(uploaded_photo_object_name)
     return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
 
   if batch_payload is not None:
@@ -172,15 +177,99 @@ def api_records(request: HttpRequest) -> JsonResponse:
   return JsonResponse({"record": serialize_record(record)}, status=201)
 
 
+@require_http_methods(["GET", "POST"])
+def api_site_observations(request: HttpRequest) -> JsonResponse:
+  if request.method == "GET":
+    try:
+      query = SiteObservation.objects.all()
+
+      building_id = request.GET.get("building_id", "").strip()
+      floor_id = request.GET.get("floor_id", "").strip()
+      search_text = request.GET.get("q", "").strip()
+
+      if building_id:
+        query = query.filter(building_id=building_id)
+      if floor_id:
+        query = query.filter(floor_id=floor_id)
+      if search_text:
+        query = query.filter(
+          Q(observation_type__icontains=search_text)
+          | Q(note__icontains=search_text)
+          | Q(photo_name__icontains=search_text)
+          | Q(building_id__icontains=search_text)
+          | Q(floor_id__icontains=search_text)
+        )
+
+      observations = [serialize_site_observation(observation) for observation in query]
+      return JsonResponse({"observations": observations})
+    except DatabaseError as exc:
+      return database_error_response(exc)
+
+  payload, uploaded_photo, error_response = parse_request_payload(request)
+  if error_response:
+    return error_response
+
+  uploaded_photo_object_name = ""
+  try:
+    if uploaded_photo is not None:
+      uploaded_photo_object_name = save_uploaded_image_object(uploaded_photo, "site-observations")
+
+    observation = build_site_observation_from_payload(
+      payload,
+      fallback_photo_object_name=uploaded_photo_object_name,
+      fallback_photo_name=uploaded_photo.name if uploaded_photo is not None else "",
+    )
+    observation.full_clean()
+    observation.save()
+  except DatabaseError as exc:
+    delete_image_object_if_unused(uploaded_photo_object_name)
+    return database_error_response(exc)
+  except ValidationError as exc:
+    delete_image_object_if_unused(uploaded_photo_object_name)
+    return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
+
+  return JsonResponse({"observation": serialize_site_observation(observation)}, status=201)
+
+
 @require_http_methods(["DELETE"])
 def api_record_detail(request: HttpRequest, record_id) -> JsonResponse:
   try:
-    deleted_count, _ = ActivityRecord.objects.filter(id=record_id).delete()
+    record = ActivityRecord.objects.filter(id=record_id).first()
   except DatabaseError as exc:
     return database_error_response(exc)
 
-  if deleted_count == 0:
+  if record is None:
     return JsonResponse({"error": "Record not found."}, status=404)
+
+  photo_object_name = record.photo_object_name
+
+  try:
+    record.delete()
+  except DatabaseError as exc:
+    return database_error_response(exc)
+
+  delete_image_object_if_unused(photo_object_name)
+  return JsonResponse({"deleted": True})
+
+
+@require_http_methods(["DELETE"])
+def api_site_observation_detail(request: HttpRequest, observation_id) -> JsonResponse:
+  try:
+    observation = SiteObservation.objects.filter(id=observation_id).first()
+  except DatabaseError as exc:
+    return database_error_response(exc)
+
+  if observation is None:
+    return JsonResponse({"error": "Site observation not found."}, status=404)
+
+  photo_object_name = observation.photo_object_name
+
+  try:
+    observation.delete()
+  except DatabaseError as exc:
+    return database_error_response(exc)
+
+  delete_image_object_if_unused(photo_object_name)
   return JsonResponse({"deleted": True})
 
 
@@ -199,10 +288,37 @@ def api_records_export(request: HttpRequest) -> HttpResponse:
   return response
 
 
+def build_page_context(active_page: str) -> dict[str, Any]:
+  return {
+    "active_page": active_page,
+    "activity_options": ACTIVITY_TYPE_OPTIONS,
+    "activity_catalog": build_activity_catalog_payload(),
+  }
+
+def parse_request_payload(request: HttpRequest) -> tuple[dict[str, Any], Any | None, JsonResponse | None]:
+  content_type = (request.content_type or "").lower()
+  if content_type.startswith("multipart/form-data"):
+    raw_payload = request.POST.get("payload", "")
+    payload, error_response = parse_json_payload_text(raw_payload)
+    return payload, request.FILES.get("photo"), error_response
+
+  payload, error_response = parse_json_request(request)
+  return payload, None, error_response
+
+
 def parse_json_request(request: HttpRequest) -> tuple[dict[str, Any], JsonResponse | None]:
   try:
-    payload = json.loads(request.body.decode("utf-8"))
-  except (UnicodeDecodeError, json.JSONDecodeError):
+    raw_payload = request.body.decode("utf-8")
+  except UnicodeDecodeError:
+    return {}, JsonResponse({"error": "Invalid JSON payload."}, status=400)
+
+  return parse_json_payload_text(raw_payload)
+
+
+def parse_json_payload_text(raw_payload: str) -> tuple[dict[str, Any], JsonResponse | None]:
+  try:
+    payload = json.loads(raw_payload)
+  except json.JSONDecodeError:
     return {}, JsonResponse({"error": "Invalid JSON payload."}, status=400)
 
   if not isinstance(payload, dict):
@@ -227,7 +343,29 @@ def database_error_response(error: Exception) -> JsonResponse:
   return JsonResponse({"error": "Database error while processing request."}, status=500)
 
 
-def build_record_from_payload(payload: dict[str, Any]) -> ActivityRecord:
+def delete_image_object_if_unused(object_name: str) -> None:
+  normalized_name = optional_string(object_name)
+  if not normalized_name:
+    return
+
+  try:
+    if ActivityRecord.objects.filter(photo_object_name=normalized_name).exists():
+      return
+
+    if SiteObservation.objects.filter(photo_object_name=normalized_name).exists():
+      return
+  except DatabaseError:
+    return
+
+  delete_image_object(normalized_name)
+
+
+def build_record_from_payload(
+  payload: dict[str, Any],
+  *,
+  fallback_photo_object_name: str = "",
+  fallback_photo_name: str = "",
+) -> ActivityRecord:
   building_id = require_non_empty_string(payload, "buildingId")
   floor_id = require_non_empty_string(payload, "floorId")
   activity_type = parse_activity_type(payload.get("activityType"))
@@ -241,6 +379,7 @@ def build_record_from_payload(payload: dict[str, Any]) -> ActivityRecord:
   location_x_pct, location_y_pct = parse_location(location)
 
   photo_name = optional_string(payload.get("photoName"))
+  photo_object_name = fallback_photo_object_name or optional_string(payload.get("photoObjectName"))
   photo_preview_data_url = parse_photo_preview(payload.get("photoPreview"))
   photo_location = payload.get("photoLocation")
   photo_latitude, photo_longitude, photo_altitude = parse_photo_location(photo_location)
@@ -259,7 +398,40 @@ def build_record_from_payload(payload: dict[str, Any]) -> ActivityRecord:
     notes=notes,
     location_x_pct=location_x_pct,
     location_y_pct=location_y_pct,
-    photo_name=photo_name,
+    photo_name=photo_name or fallback_photo_name,
+    photo_object_name=photo_object_name,
+    photo_preview_data_url=photo_preview_data_url,
+    photo_latitude=photo_latitude,
+    photo_longitude=photo_longitude,
+    photo_altitude=photo_altitude,
+  )
+
+
+def build_site_observation_from_payload(
+  payload: dict[str, Any],
+  *,
+  fallback_photo_object_name: str = "",
+  fallback_photo_name: str = "",
+) -> SiteObservation:
+  building_id = optional_string(payload.get("buildingId"))
+  floor_id = optional_string(payload.get("floorId"))
+  observation_type = parse_observation_type(payload.get("observationType"))
+  observation_time = parse_optional_datetime(payload.get("observationTime"), "observationTime")
+  note = optional_string(payload.get("note", payload.get("notes")))
+  photo_name = optional_string(payload.get("photoName"))
+  photo_object_name = fallback_photo_object_name or optional_string(payload.get("photoObjectName"))
+  photo_preview_data_url = parse_photo_preview(payload.get("photoPreview"))
+  photo_location = payload.get("photoLocation")
+  photo_latitude, photo_longitude, photo_altitude = parse_photo_location(photo_location)
+
+  return SiteObservation(
+    building_id=building_id,
+    floor_id=floor_id,
+    observation_type=observation_type,
+    observation_time=observation_time,
+    note=note,
+    photo_name=photo_name or fallback_photo_name,
+    photo_object_name=photo_object_name,
     photo_preview_data_url=photo_preview_data_url,
     photo_latitude=photo_latitude,
     photo_longitude=photo_longitude,
@@ -278,6 +450,17 @@ def optional_string(value: Any) -> str:
   if value is None:
     return ""
   return str(value).strip()
+
+
+def parse_observation_type(value: Any) -> str:
+  if not isinstance(value, str):
+    raise ValidationError({"observationType": ["Observation type is required."]})
+
+  normalized = value.strip().lower()
+  if normalized not in ALLOWED_OBSERVATION_TYPES:
+    raise ValidationError({"observationType": ["Observation type must be either 'photo' or 'note'."]})
+
+  return normalized
 
 
 def parse_activity_type(value: Any) -> str:
@@ -301,7 +484,7 @@ def parse_activity_type(value: Any) -> str:
   if not selected:
     raise ValidationError({"activityType": ["Select at least one activity type."]})
 
-  return ", ".join([activity for activity in ALLOWED_ACTIVITY_TYPES if activity in selected])
+  return ", ".join([activity for activity in ACTIVITY_TYPE_OPTIONS if activity in selected])
 
 
 def normalize_activity_type_label(value: str) -> str:
@@ -310,7 +493,7 @@ def normalize_activity_type_label(value: str) -> str:
     return ""
 
   aliased = ACTIVITY_TYPE_ALIASES.get(normalized.lower(), normalized)
-  for activity in ALLOWED_ACTIVITY_TYPES:
+  for activity in ACTIVITY_TYPE_OPTIONS:
     if activity.lower() == aliased.lower():
       return activity
 
@@ -349,6 +532,16 @@ def parse_required_datetime(value: Any, key: str):
     parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
 
   return parsed
+
+
+def parse_optional_datetime(value: Any, key: str):
+  if value is None:
+    return timezone.now()
+
+  if isinstance(value, str) and not value.strip():
+    return timezone.now()
+
+  return parse_required_datetime(value, key)
 
 
 def parse_location(value: Any) -> tuple[Decimal | None, Decimal | None]:
@@ -462,7 +655,35 @@ def serialize_record(record: ActivityRecord) -> dict[str, Any]:
     "notes": record.notes,
     "location": location,
     "photoName": record.photo_name or None,
+    "photoObjectName": record.photo_object_name or None,
+    "photoUrl": build_image_object_url(record.photo_object_name),
     "photoPreview": record.photo_preview_data_url or None,
+    "photoLocation": photo_location,
+  }
+
+
+def serialize_site_observation(observation: SiteObservation) -> dict[str, Any]:
+  photo_location = None
+  if observation.photo_latitude is not None and observation.photo_longitude is not None:
+    photo_location = {
+      "latitude": float(observation.photo_latitude),
+      "longitude": float(observation.photo_longitude),
+    }
+    if observation.photo_altitude is not None:
+      photo_location["altitude"] = float(observation.photo_altitude)
+
+  return {
+    "id": str(observation.id),
+    "createdAt": isoformat_utc(observation.created_at),
+    "buildingId": observation.building_id or None,
+    "floorId": observation.floor_id or None,
+    "observationType": observation.observation_type,
+    "observationTime": isoformat_utc(observation.observation_time),
+    "note": observation.note or None,
+    "photoName": observation.photo_name or None,
+    "photoObjectName": observation.photo_object_name or None,
+    "photoUrl": build_image_object_url(observation.photo_object_name),
+    "photoPreview": observation.photo_preview_data_url or None,
     "photoLocation": photo_location,
   }
 

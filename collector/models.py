@@ -21,6 +21,7 @@ class ActivityRecord(models.Model):
   location_y_pct = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
 
   photo_name = models.CharField(max_length=255, blank=True)
+  photo_object_name = models.CharField(max_length=512, blank=True, default="")
   photo_preview_data_url = models.TextField(blank=True)
   photo_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
   photo_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
@@ -46,6 +47,54 @@ class ActivityRecord(models.Model):
 
   def __str__(self) -> str:
     return f"{self.activity_type} @ {self.building_id}/{self.floor_id} ({self.activity_time.isoformat()})"
+
+
+class SiteObservation(models.Model):
+  OBSERVATION_TYPE_CHOICES = (
+    ("photo", "Photo"),
+    ("note", "Note"),
+  )
+
+  id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+  created_at = models.DateTimeField(auto_now_add=True)
+  building_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
+  floor_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
+  observation_type = models.CharField(max_length=16, choices=OBSERVATION_TYPE_CHOICES, db_index=True)
+  observation_time = models.DateTimeField(db_index=True, default=timezone.now)
+  note = models.TextField(blank=True)
+  photo_name = models.CharField(max_length=255, blank=True)
+  photo_object_name = models.CharField(max_length=512, blank=True, default="")
+  photo_preview_data_url = models.TextField(blank=True)
+  photo_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+  photo_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+  photo_altitude = models.DecimalField(max_digits=9, decimal_places=2, null=True, blank=True)
+
+  class Meta:
+    ordering = ["-observation_time", "-created_at"]
+
+  def clean(self) -> None:
+    has_note = bool((self.note or "").strip())
+    has_photo_object = bool((self.photo_object_name or "").strip())
+    has_photo_preview = bool((self.photo_preview_data_url or "").strip())
+    has_photo_lat = self.photo_latitude is not None
+    has_photo_lng = self.photo_longitude is not None
+
+    if has_photo_lat != has_photo_lng:
+      raise ValidationError("Both photo latitude and longitude must be provided together.")
+
+    if self.observation_type == "note" and not has_note:
+      raise ValidationError({"note": ["A note is required for note observations."]})
+
+    if self.observation_type == "photo" and not has_photo_preview and not has_photo_object:
+      raise ValidationError({"photoObjectName": ["A stored image is required for photo observations."]})
+
+    if not has_note and not has_photo_preview and not has_photo_object:
+      raise ValidationError("A note or photo is required.")
+
+  def __str__(self) -> str:
+    observation_label = self.observation_type.title()
+    location_label = "/".join(part for part in [self.building_id, self.floor_id] if part) or "unassigned"
+    return f"{observation_label} observation @ {location_label} ({self.observation_time.isoformat()})"
 
 
 class Building(models.Model):

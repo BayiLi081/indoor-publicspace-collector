@@ -5,14 +5,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Indoor Activity Location Recorder</title>
-  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260330-11">
+  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260331-1">
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-row">
       <div>
         <h1>Indoor Activity Location Recorder</h1>
-        <p>Capture observations on the map, then save them into the dataset.</p>
+        <p>Capture structured activity records on the map, or save separate site observations.</p>
       </div>
       <nav class="topnav" aria-label="Primary">
         <a href="{% url 'index' %}"{% if active_page == 'capture' %} class="active"{% endif %}>Capture</a>
@@ -20,6 +20,25 @@
       </nav>
     </div>
   </header>
+
+  <aside class="observation-fab-stack" aria-label="Site observation tools">
+    <div class="observation-fab-row" role="group" aria-label="Site observation actions">
+      <button id="observationCameraBtn" type="button" class="fab-button" title="Take a site observation photo">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M9 6 10.6 4h2.8L15 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3Zm3 9.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="sr-only">Take a site observation photo</span>
+      </button>
+      <button id="observationNoteBtn" type="button" class="fab-button fab-button-note secondary" title="Save a site observation note">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M8 4h8l4 4v12a1 1 0 0 1-1 1H8a4 4 0 0 1-4-4V5a1 1 0 0 1 1-1h3Zm1 10h6m-6 3h6m-6-6h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="sr-only">Save a site observation note</span>
+      </button>
+    </div>
+    <p id="observationStatus" class="observation-status" data-state="muted" role="status" aria-live="polite"></p>
+    <input id="observationPhotoInput" type="file" accept="image/*" capture="environment" hidden>
+  </aside>
 
   <main class="layout">
     <section class="map-panel">
@@ -61,8 +80,7 @@
           >
         </div>
       </div>
-      <p id="collectStatus" class="collect-status" data-state="muted">Select Individual or Group to begin capture.</p>
-      <p class="hint">Use + / - / Fit, mouse wheel, or pinch to zoom at any point. Individual mode needs one map point. In group mode, each map click opens a popup to record that person's activity type, gender, and age group. Save the group only after all members are entered.</p>
+      <p id="collectStatus" class="collect-status" data-state="muted" role="status" aria-live="polite"></p>
     </section>
 
     <section class="form-panel">
@@ -88,17 +106,9 @@
             <span>Activity Type</span>
             <input id="activityType" type="hidden">
             <div class="activity-type-controls" id="activityTypeControls" role="group" aria-label="Activity type">
-              <button type="button" class="toggle-btn" data-activity-type="Walking" aria-pressed="false">Walking</button>
-              <button type="button" class="toggle-btn" data-activity-type="Strolling" aria-pressed="false">Strolling</button>
-              <button type="button" class="toggle-btn" data-activity-type="Sitting" aria-pressed="false">Sitting</button>
-              <button type="button" class="toggle-btn" data-activity-type="Standing" aria-pressed="false">Standing</button>
-              <button type="button" class="toggle-btn" data-activity-type="Talking" aria-pressed="false">Talking</button>
-              <button type="button" class="toggle-btn" data-activity-type="Queueing" aria-pressed="false">Queueing</button>
-              <button type="button" class="toggle-btn" data-activity-type="Phone Calling" aria-pressed="false">Phone Calling</button>
-              <button type="button" class="toggle-btn" data-activity-type="Smoking" aria-pressed="false">Smoking</button>
-              <button type="button" class="toggle-btn" data-activity-type="Eating / Drinking" aria-pressed="false">Eating / Drinking</button>
-              <button type="button" class="toggle-btn" data-activity-type="Running / Exercising" aria-pressed="false">Running / Exercising</button>
-              <button type="button" class="toggle-btn" data-activity-type="Others" aria-pressed="false">Others</button>
+              {% for activity_option in activity_options %}
+              <button type="button" class="toggle-btn" data-activity-type="{{ activity_option }}" aria-pressed="false">{{ activity_option }}</button>
+              {% endfor %}
             </div>
             <small class="field-hint">Select one or more activities.</small>
           </div>
@@ -174,17 +184,9 @@
         <div class="input-group">
           <span>Activity Type</span>
           <div class="activity-type-controls" role="group" aria-label="Group member activity type">
-            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Walking" aria-pressed="false">Walking</button>
-            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Strolling" aria-pressed="false">Strolling</button>
-            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Sitting" aria-pressed="false">Sitting</button>
-            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Standing" aria-pressed="false">Standing</button>
-            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Talking" aria-pressed="false">Talking</button>
-            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Queueing" aria-pressed="false">Queueing</button>
-            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Phone Calling" aria-pressed="false">Phone Calling</button>
-            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Smoking" aria-pressed="false">Smoking</button>
-            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Eating / Drinking" aria-pressed="false">Eating / Drinking</button>
-            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Running / Exercising" aria-pressed="false">Running / Exercising</button>
-            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="Others" aria-pressed="false">Others</button>
+            {% for activity_option in activity_options %}
+            <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="{{ activity_option }}" aria-pressed="false">{{ activity_option }}</button>
+            {% endfor %}
           </div>
           <small class="field-hint">Select one or more activities for this person.</small>
         </div>
@@ -218,6 +220,38 @@
     </div>
   </div>
 
-  <script type="module" src="{% static 'collector/app.js' %}?v=20260330-9"></script>
+  <div id="observationModal" class="modal-shell" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-observation-close></div>
+    <div class="modal-card observation-modal-card" role="dialog" aria-modal="true" aria-labelledby="observationModalTitle">
+      <form id="observationForm" class="observation-form">
+        <div class="modal-head">
+          <div>
+            <h3 id="observationModalTitle">Save Site Observation</h3>
+            <p class="modal-subtitle">Stored separately from structured activity records.</p>
+          </div>
+        </div>
+
+        <div class="observation-context">
+          <strong>Current map context</strong>
+          <p id="observationContext">No building or floor selected.</p>
+        </div>
+
+        <label>
+          Observation Note
+          <textarea id="observationNote" rows="5" placeholder="Add a quick note about the site. This will be saved as a site observation."></textarea>
+        </label>
+
+        <p id="observationPrompt" class="save-prompt" data-state="muted" role="status" aria-live="polite"></p>
+
+        <div class="actions modal-actions">
+          <button id="observationCancelBtn" type="button" class="secondary">Cancel</button>
+          <button id="observationSaveBtn" type="submit">Save Observation</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {{ activity_catalog|json_script:"activityCatalogData" }}
+  <script type="module" src="{% static 'collector/app.js' %}?v=20260331-1"></script>
 </body>
 </html>

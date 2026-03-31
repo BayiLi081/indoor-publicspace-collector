@@ -1,6 +1,9 @@
+import { loadActivityCatalog } from "./activity-catalog.js";
+
 const API_BUILDINGS = "/api/buildings/";
 const API_RECORDS = "/api/records/";
 const API_RECORDS_EXPORT = "/api/records/export/";
+const API_SITE_OBSERVATIONS = "/api/site-observations/";
 
 const ROOT_BUILDING_ID = "__root__";
 const ALL_BUILDINGS_ID = "__all_buildings__";
@@ -13,22 +16,9 @@ const DEFAULT_MAP_ZOOM = 1;
 const WHEEL_ZOOM_SENSITIVITY = 0.0016;
 const MAX_PREVIEW_DATA_URL_LENGTH = 180000;
 const PREVIEW_DATA_URL_PATTERN = /^data:image\/(jpeg|jpg|png|webp);base64,[a-z0-9+/=]+$/i;
-const ACTIVITY_TYPE_OPTIONS = [
-  "Walking",
-  "Strolling",
-  "Sitting",
-  "Standing",
-  "Talking",
-  "Queueing",
-  "Phone Calling",
-  "Smoking",
-  "Eating / Drinking",
-  "Running / Exercising",
-  "Others",
-];
-const ACTIVITY_TYPE_ALIASES = {
-  other: "Others",
-};
+const ACTIVITY_CATALOG = loadActivityCatalog();
+const ACTIVITY_TYPE_OPTIONS = ACTIVITY_CATALOG.options;
+const ACTIVITY_TYPE_ALIASES = ACTIVITY_CATALOG.aliases;
 
 const LEGACY_BUILDING_MAPS = {
   [ROOT_BUILDING_ID]: {
@@ -62,10 +52,18 @@ const managementMapPopupTitle = document.getElementById("managementMapPopupTitle
 const managementMapPopupSubtitle = document.getElementById("managementMapPopupSubtitle");
 const managementMapPopupBody = document.getElementById("managementMapPopupBody");
 const managementMapPopupCloseBtn = document.getElementById("managementMapPopupCloseBtn");
+const observationCount = document.getElementById("observationCount");
+const observationList = document.getElementById("observationList");
+const observationPhotoModal = document.getElementById("observationPhotoModal");
+const observationPhotoModalImage = document.getElementById("observationPhotoModalImage");
+const observationPhotoModalTitle = document.getElementById("observationPhotoModalTitle");
+const observationPhotoModalSubtitle = document.getElementById("observationPhotoModalSubtitle");
+const observationPhotoModalCloseBtn = document.getElementById("observationPhotoModalCloseBtn");
 const recordCount = document.getElementById("recordCount");
 const recordsTbody = document.getElementById("recordsTbody");
 
 let records = [];
+let observations = [];
 let buildingMaps = {};
 let currentBuildingId = ALL_BUILDINGS_ID;
 let currentFloorId = ALL_FLOORS_ID;
@@ -80,7 +78,7 @@ initialize().catch((error) => {
 });
 
 async function initialize() {
-  setManagementStatus("Loading buildings and records...", "muted");
+  setManagementStatus("Loading buildings, records, and site observations...", "muted");
   buildingSelect.innerHTML = "<option>Loading...</option>";
   floorSelect.innerHTML = "<option>Loading...</option>";
   setManagementMapStatus("Select one building and one floor to display the map.");
@@ -111,6 +109,12 @@ async function initialize() {
   if (managementMapPopupCloseBtn) {
     managementMapPopupCloseBtn.addEventListener("click", clearMapSelection);
   }
+  if (observationPhotoModalCloseBtn) {
+    observationPhotoModalCloseBtn.addEventListener("click", closeObservationPhotoModal);
+  }
+  if (observationPhotoModal) {
+    observationPhotoModal.addEventListener("click", onObservationPhotoModalClick);
+  }
   document.addEventListener("keydown", onDocumentKeyDown);
   window.addEventListener("resize", () => {
     renderManagementMap();
@@ -119,9 +123,8 @@ async function initialize() {
   setMapZoom(DEFAULT_MAP_ZOOM, { preserveCenter: false });
 
   await loadBuildingMaps();
-  records = await loadRecords();
+  await loadManagementData();
   renderRecords();
-  setManagementStatus(`Loaded ${records.length} record${records.length === 1 ? "" : "s"}.`, "muted");
 }
 
 function onBuildingChange(event) {
@@ -140,18 +143,43 @@ function onFloorChange(event) {
 
 async function onRefresh() {
   refreshBtn.disabled = true;
-  setManagementStatus("Refreshing records...", "muted");
+  setManagementStatus("Refreshing records and site observations...", "muted");
 
   try {
-    records = await loadRecords();
+    await loadManagementData({ showSuccess: true });
     renderRecords();
-    setManagementStatus(`Loaded ${records.length} record${records.length === 1 ? "" : "s"}.`, "success");
   } catch (error) {
-    setManagementStatus(`Could not refresh records: ${error.message}`, "error");
-    alert(`Could not refresh records: ${error.message}`);
+    setManagementStatus(`Could not refresh management data: ${error.message}`, "error");
+    alert(`Could not refresh management data: ${error.message}`);
   } finally {
     refreshBtn.disabled = false;
   }
+}
+
+async function loadManagementData({ showSuccess = false } = {}) {
+  const [recordsResult, observationsResult] = await Promise.allSettled([loadRecords(), loadSiteObservations()]);
+
+  if (recordsResult.status !== "fulfilled") {
+    throw recordsResult.reason;
+  }
+
+  records = recordsResult.value;
+  observations = observationsResult.status === "fulfilled" ? observationsResult.value : [];
+
+  if (observationsResult.status === "rejected") {
+    const observationMessage =
+      observationsResult.reason && typeof observationsResult.reason.message === "string"
+        ? observationsResult.reason.message
+        : "Site observations are unavailable.";
+    setManagementStatus(
+      `Loaded ${records.length} record${records.length === 1 ? "" : "s"}, but site observations could not be loaded: ${observationMessage}`,
+      "error"
+    );
+    return;
+  }
+
+  const summary = `Loaded ${records.length} record${records.length === 1 ? "" : "s"} and ${observations.length} site observation${observations.length === 1 ? "" : "s"}.`;
+  setManagementStatus(summary, showSuccess ? "success" : "muted");
 }
 
 async function loadBuildingMaps() {
@@ -266,6 +294,41 @@ function getFilteredRecords() {
         formatDate(record.activityTime),
         formatMapLocation(record.location),
         formatPhotoLocationText(record.photoLocation, record.photoName),
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return target.includes(query);
+    });
+}
+
+function getFilteredObservations() {
+  const query = searchInput.value.trim().toLowerCase();
+
+  return observations
+    .slice()
+    .sort((left, right) => getObservationSortValue(right) - getObservationSortValue(left))
+    .filter((observation) => {
+      const observationBuildingId = getObservationBuildingId(observation);
+      const observationFloorId = getObservationFloorId(observation);
+
+      if (currentBuildingId !== ALL_BUILDINGS_ID && observationBuildingId !== currentBuildingId) {
+        return false;
+      }
+      if (currentFloorId !== ALL_FLOORS_ID && observationFloorId !== currentFloorId) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      const target = [
+        observation.observationType,
+        observation.note,
+        observation.photoName,
+        getObservationContextText(observation),
+        formatDate(observation.observationTime || observation.createdAt),
       ]
         .join(" ")
         .toLowerCase();
@@ -814,9 +877,65 @@ function onMapBackgroundClick(event) {
 }
 
 function onDocumentKeyDown(event) {
+  if (event.key === "Escape" && isObservationPhotoModalOpen()) {
+    closeObservationPhotoModal();
+    return;
+  }
+
   if (event.key === "Escape" && selectedMapItem) {
     clearMapSelection();
   }
+}
+
+function onObservationPhotoModalClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (target.hasAttribute("data-observation-photo-close")) {
+    closeObservationPhotoModal();
+  }
+}
+
+function openObservationPhotoModal(observationId) {
+  if (!observationPhotoModal || !observationPhotoModalImage || !observationId) {
+    return;
+  }
+
+  const observation = observations.find((item) => item.id === observationId);
+  const imageSource = observation?.photoUrl || observation?.photoPreview;
+  if (!imageSource) {
+    return;
+  }
+
+  observationPhotoModalImage.src = imageSource;
+  observationPhotoModalImage.alt = observation.photoName || "Zoomed site observation";
+  if (observationPhotoModalTitle) {
+    observationPhotoModalTitle.textContent = observation.photoName || "Observation Photo";
+  }
+  if (observationPhotoModalSubtitle) {
+    observationPhotoModalSubtitle.textContent = `${formatDate(observation.observationTime || observation.createdAt)} | ${getObservationContextText(observation)}`;
+  }
+  observationPhotoModal.hidden = false;
+  observationPhotoModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+}
+
+function closeObservationPhotoModal() {
+  if (!observationPhotoModal || !observationPhotoModalImage) {
+    return;
+  }
+
+  observationPhotoModal.hidden = true;
+  observationPhotoModal.setAttribute("aria-hidden", "true");
+  observationPhotoModalImage.removeAttribute("src");
+  observationPhotoModalImage.alt = "Zoomed site observation";
+  document.body.classList.remove("modal-open");
+}
+
+function isObservationPhotoModalOpen() {
+  return !!observationPhotoModal && !observationPhotoModal.hidden;
 }
 
 function getFloorConfig(buildingId, floorId) {
@@ -950,8 +1069,10 @@ function clampScrollValue(value) {
 
 function renderRecords() {
   const filtered = getFilteredRecords();
+  const filteredObservations = getFilteredObservations();
 
   recordCount.textContent = `${filtered.length} of ${records.length} record${records.length === 1 ? "" : "s"}`;
+  renderSiteObservations(filteredObservations);
   recordsTbody.innerHTML = "";
   renderManagementMap(filtered);
 
@@ -976,7 +1097,7 @@ function renderRecords() {
       <td>${escapeHtml(getBuildingLabel(recordBuildingId))}</td>
       <td>${escapeHtml(getFloorLabel(recordBuildingId, recordFloorId))}</td>
       <td>${escapeHtml(formatMapLocation(record.location))}</td>
-      <td>${formatPhotoPreviewCell(record.photoPreview, record.photoName)}</td>
+      <td>${formatPhotoPreviewCell(record.photoUrl, record.photoPreview, record.photoName)}</td>
       <td>${escapeHtml(formatPhotoLocationText(record.photoLocation, record.photoName))}</td>
       <td>${escapeHtml(record.notes || "-")}</td>
       <td><button type="button" class="danger" data-delete-id="${record.id}">Delete</button></td>
@@ -989,12 +1110,77 @@ function renderRecords() {
   });
 }
 
+function renderSiteObservations(filteredObservations = getFilteredObservations()) {
+  if (!observationList || !observationCount) {
+    return;
+  }
+
+  observationCount.textContent = `${filteredObservations.length} of ${observations.length} observation${observations.length === 1 ? "" : "s"}`;
+  observationList.innerHTML = "";
+
+  if (!filteredObservations.length) {
+    observationList.innerHTML = `<p class="observation-empty">No site observations match the current filters.</p>`;
+    return;
+  }
+
+  filteredObservations.forEach((observation) => {
+    const imageSource = observation.photoUrl || observation.photoPreview;
+    const observationTypeLabel = observation.observationType === "photo" ? "Photo" : "Note";
+    const card = document.createElement("article");
+    card.className = "observation-card";
+    card.innerHTML = `
+      <div class="observation-card-media">
+        ${
+          imageSource
+            ? `
+              <button type="button" class="observation-photo-button" data-observation-photo-id="${escapeHtml(observation.id)}" aria-label="Zoom observation photo">
+                <img
+                  class="observation-card-photo"
+                  src="${imageSource}"
+                  alt="${escapeHtml(observation.photoName || "Site observation photo")}"
+                  loading="lazy"
+                  decoding="async"
+                >
+              </button>
+            `
+            : `<div class="observation-photo-placeholder">No photo</div>`
+        }
+      </div>
+      <div class="observation-card-copy">
+        <p class="observation-card-meta">${escapeHtml(formatDate(observation.observationTime || observation.createdAt))}</p>
+        <p class="observation-card-context">${escapeHtml(getObservationContextText(observation))}</p>
+        <p class="observation-card-note">${escapeHtml(truncateWords(observation.note || "No note added.", 100))}</p>
+        <div class="observation-card-actions">
+          <span class="observation-card-type">${escapeHtml(observationTypeLabel)}</span>
+          <button type="button" class="danger observation-delete-btn" data-delete-observation-id="${escapeHtml(observation.id)}">Delete</button>
+        </div>
+      </div>
+    `;
+    observationList.appendChild(card);
+  });
+
+  observationList.querySelectorAll("[data-observation-photo-id]").forEach((button) => {
+    button.addEventListener("click", () => openObservationPhotoModal(button.dataset.observationPhotoId || ""));
+  });
+  observationList.querySelectorAll("[data-delete-observation-id]").forEach((button) => {
+    button.addEventListener("click", () => deleteSiteObservation(button.dataset.deleteObservationId || ""));
+  });
+}
+
 async function loadRecords() {
   const payload = await apiGet(API_RECORDS);
   const values = Array.isArray(payload.records) ? payload.records : [];
   return values
     .map((record) => normalizeRecord(record))
     .filter((record) => record !== null);
+}
+
+async function loadSiteObservations() {
+  const payload = await apiGet(API_SITE_OBSERVATIONS);
+  const values = Array.isArray(payload.observations) ? payload.observations : [];
+  return values
+    .map((observation) => normalizeObservation(observation))
+    .filter((observation) => observation !== null);
 }
 
 async function deleteRecord(id) {
@@ -1021,6 +1207,45 @@ async function deleteRecord(id) {
     setManagementStatus(`Could not delete record: ${error.message}`, "error");
     alert(`Could not delete record: ${error.message}`);
   }
+}
+
+async function deleteSiteObservation(id) {
+  if (!id) {
+    return;
+  }
+
+  const observation = observations.find((item) => item.id === id);
+  const label = buildObservationDeleteLabel(observation);
+  if (!window.confirm(`Delete ${label}?`)) {
+    return;
+  }
+
+  try {
+    const response = await apiRequest(`${API_SITE_OBSERVATIONS}${id}/`, { method: "DELETE" });
+    if (!response.ok) {
+      throw new Error(await parseApiError(response));
+    }
+
+    observations = observations.filter((item) => item.id !== id);
+    closeObservationPhotoModal();
+    renderRecords();
+    setManagementStatus(`Deleted ${label}.`, "success");
+  } catch (error) {
+    setManagementStatus(`Could not delete site observation: ${error.message}`, "error");
+    alert(`Could not delete site observation: ${error.message}`);
+  }
+}
+
+function buildObservationDeleteLabel(observation) {
+  if (!observation) {
+    return "this site observation";
+  }
+
+  if (observation.observationType === "photo") {
+    return observation.photoName ? `photo observation ${observation.photoName}` : "this photo observation";
+  }
+
+  return "this note observation";
 }
 
 async function onExport() {
@@ -1076,7 +1301,32 @@ function normalizeRecord(record) {
     location: hasMapLocation(record.location) ? { ...record.location } : null,
     photoLocation: isValidPhotoLocation(record.photoLocation) ? { ...record.photoLocation } : null,
     photoName: typeof record.photoName === "string" && record.photoName.trim() ? record.photoName : null,
+    photoUrl: normalizePhotoUrl(record.photoUrl),
     photoPreview: normalizePhotoPreview(record.photoPreview),
+  };
+}
+
+function normalizeObservation(observation) {
+  if (!observation || typeof observation !== "object") {
+    return null;
+  }
+
+  const normalizedType =
+    observation.observationType === "photo" || observation.observationType === "note"
+      ? observation.observationType
+      : "note";
+
+  return {
+    ...observation,
+    buildingId:
+      typeof observation.buildingId === "string" && observation.buildingId.trim() ? observation.buildingId : null,
+    floorId: typeof observation.floorId === "string" && observation.floorId.trim() ? observation.floorId : null,
+    observationType: normalizedType,
+    note: typeof observation.note === "string" && observation.note.trim() ? observation.note.trim() : null,
+    photoName:
+      typeof observation.photoName === "string" && observation.photoName.trim() ? observation.photoName.trim() : null,
+    photoUrl: normalizePhotoUrl(observation.photoUrl),
+    photoPreview: normalizePhotoPreview(observation.photoPreview),
   };
 }
 
@@ -1196,6 +1446,41 @@ function getBuildingLabel(buildingId) {
 
 function getFloorLabel(buildingId, floorId) {
   return buildingMaps[buildingId]?.floors?.[floorId]?.label || "Unknown Floor";
+}
+
+function getObservationBuildingId(observation) {
+  return typeof observation?.buildingId === "string" && observation.buildingId.trim() ? observation.buildingId : "";
+}
+
+function getObservationFloorId(observation) {
+  return typeof observation?.floorId === "string" && observation.floorId.trim() ? observation.floorId : "";
+}
+
+function getObservationContextText(observation) {
+  const buildingId = getObservationBuildingId(observation);
+  const floorId = getObservationFloorId(observation);
+
+  if (buildingId && floorId) {
+    return `${getBuildingLabel(buildingId)} / ${getFloorLabel(buildingId, floorId)}`;
+  }
+  if (buildingId) {
+    return getBuildingLabel(buildingId);
+  }
+  return "No map context";
+}
+
+function getObservationSortValue(observation) {
+  const observationTime = Date.parse(observation?.observationTime || "");
+  if (Number.isFinite(observationTime)) {
+    return observationTime;
+  }
+
+  const createdAt = Date.parse(observation?.createdAt || "");
+  if (Number.isFinite(createdAt)) {
+    return createdAt;
+  }
+
+  return 0;
 }
 
 function hasMapLocation(location) {
@@ -1332,14 +1617,35 @@ function normalizeAgeGroup(value) {
   return normalized || null;
 }
 
-function formatPhotoPreviewCell(photoPreview, photoName) {
-  const normalizedPreview = normalizePhotoPreview(photoPreview);
-  if (!normalizedPreview) {
+function formatPhotoPreviewCell(photoUrl, photoPreview, photoName) {
+  const imageSource = normalizePhotoUrl(photoUrl) || normalizePhotoPreview(photoPreview);
+  if (!imageSource) {
     return "-";
   }
 
   const altText = escapeHtml(photoName ? `${photoName} preview` : "Photo preview");
-  return `<img class="record-photo-preview" src="${normalizedPreview}" alt="${altText}" loading="lazy" decoding="async">`;
+  return `<img class="record-photo-preview" src="${imageSource}" alt="${altText}" loading="lazy" decoding="async">`;
+}
+
+function normalizePhotoUrl(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (
+    normalized.startsWith("/") ||
+    normalized.startsWith("http://") ||
+    normalized.startsWith("https://")
+  ) {
+    return normalized;
+  }
+
+  return null;
 }
 
 function normalizePhotoPreview(value) {
@@ -1357,6 +1663,19 @@ function normalizePhotoPreview(value) {
   }
 
   return normalized;
+}
+
+function truncateWords(value, wordLimit = 100) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const words = value.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= wordLimit) {
+    return words.join(" ");
+  }
+
+  return `${words.slice(0, wordLimit).join(" ")}...`;
 }
 
 function formatDate(isoString) {
