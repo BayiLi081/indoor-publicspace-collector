@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Management Access</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at top, rgba(34, 87, 122, 0.18), transparent 40%),
+        linear-gradient(180deg, #f8fbfd 0%, #edf3f7 100%);
+      color: #173042;
+    }
+
+    .card {
+      width: min(100%, 28rem);
+      box-sizing: border-box;
+      margin: 1.5rem;
+      padding: 1.75rem;
+      border-radius: 1rem;
+      background: #ffffff;
+      box-shadow: 0 1.5rem 3.5rem rgba(23, 48, 66, 0.12);
+    }
+
+    h1 {
+      margin: 0 0 0.5rem;
+      font-size: 1.6rem;
+    }
+
+    p {
+      margin: 0 0 1rem;
+      line-height: 1.5;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0.8rem 0.9rem;
+      border: 1px solid #c5d4df;
+      border-radius: 0.7rem;
+      font-size: 1rem;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 1rem;
+      padding: 0.85rem 1rem;
+      border: 0;
+      border-radius: 0.7rem;
+      background: #1f6b94;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #175777;
+    }
+
+    .error {
+      margin-bottom: 1rem;
+      padding: 0.85rem 0.95rem;
+      border-radius: 0.7rem;
+      background: #fff0ef;
+      color: #9a2d25;
+    }
+
+    .back-link {
+      display: inline-block;
+      margin-top: 1rem;
+      color: #1f6b94;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Management Access</h1>
+    <p>Enter the shared access code to open the data management interface.</p>
+
+    {% if error_message %}
+    <div class="error" role="alert">{{ error_message }}</div>
+    {% endif %}
+
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next_path }}">
+      <label for="accessCode">Access Code</label>
+      <input id="accessCode" name="access_code" type="password" autocomplete="current-password" required autofocus>
+      <button type="submit">Continue</button>
+    </form>
+
+    <a class="back-link" href="{% url 'index' %}">Return to capture page</a>
+  </main>
+</body>
+</html>

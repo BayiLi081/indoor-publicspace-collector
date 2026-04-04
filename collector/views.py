@@ -10,8 +10,9 @@ from django.core.exceptions import ValidationError
 from django.db import DatabaseError, transaction
 from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods
@@ -24,6 +25,13 @@ from .activity_catalog import (
 from .building_catalog import discover_building_maps as discover_building_maps_catalog
 from .floorplan_svg import convert_jpg_floorplan_to_svg, should_regenerate_jpg_wrapper
 from .locate_via_gps import GPSMappingError, get_floor_heading_offset, locate_map_point_from_gps
+from .management_auth import (
+  clear_management_access,
+  get_management_access_denial_response,
+  grant_management_access,
+  management_access_required,
+  validate_management_access_code,
+)
 from .models import ActivityRecord, SiteObservation
 from .object_storage import build_image_object_url, delete_image_object, save_uploaded_image_object
 
@@ -52,6 +60,56 @@ def index(request: HttpRequest) -> HttpResponse:
   return render(request, "collector/index.html", build_page_context("capture"))
 
 
+@ensure_csrf_cookie
+@require_http_methods(["GET", "POST"])
+def management_login(request: HttpRequest) -> HttpResponse:
+  if not settings.MANAGEMENT_ACCESS_ENABLED:
+    return redirect("management")
+
+  if not settings.MANAGEMENT_ACCESS_CODE:
+    return render(
+      request,
+      "collector/management_login.html",
+      {
+        "next_path": "/management/",
+        "error_message": "Management access code is not configured.",
+        "management_access_enabled": settings.MANAGEMENT_ACCESS_ENABLED,
+      },
+      status=503,
+    )
+
+  next_path = get_safe_management_redirect_target(request)
+  if request.session.get("management_access_granted"):
+    return redirect(next_path)
+
+  error_message = ""
+  if request.method == "POST":
+    submitted_code = request.POST.get("access_code", "")
+    if validate_management_access_code(submitted_code):
+      grant_management_access(request)
+      return redirect(next_path)
+
+    error_message = "Incorrect access code."
+
+  return render(
+    request,
+    "collector/management_login.html",
+    {
+      "next_path": next_path,
+      "error_message": error_message,
+      "management_access_enabled": settings.MANAGEMENT_ACCESS_ENABLED,
+    },
+    status=403 if error_message else 200,
+  )
+
+
+@require_http_methods(["POST"])
+def management_logout(request: HttpRequest) -> HttpResponse:
+  clear_management_access(request)
+  return redirect("management_login")
+
+
+@management_access_required
 @ensure_csrf_cookie
 def management(request: HttpRequest) -> HttpResponse:
   return render(request, "collector/management.html", build_page_context("management"))
@@ -98,6 +156,10 @@ def api_locate_via_gps(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "POST"])
 def api_records(request: HttpRequest) -> JsonResponse:
   if request.method == "GET":
+    denial_response = get_management_access_denial_response(request)
+    if denial_response is not None:
+      return denial_response
+
     try:
       query = ActivityRecord.objects.all()
 
@@ -180,6 +242,10 @@ def api_records(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "POST"])
 def api_site_observations(request: HttpRequest) -> JsonResponse:
   if request.method == "GET":
+    denial_response = get_management_access_denial_response(request)
+    if denial_response is not None:
+      return denial_response
+
     try:
       query = SiteObservation.objects.all()
 
@@ -231,6 +297,7 @@ def api_site_observations(request: HttpRequest) -> JsonResponse:
   return JsonResponse({"observation": serialize_site_observation(observation)}, status=201)
 
 
+@management_access_required
 @require_http_methods(["DELETE"])
 def api_record_detail(request: HttpRequest, record_id) -> JsonResponse:
   try:
@@ -252,6 +319,7 @@ def api_record_detail(request: HttpRequest, record_id) -> JsonResponse:
   return JsonResponse({"deleted": True})
 
 
+@management_access_required
 @require_http_methods(["DELETE"])
 def api_site_observation_detail(request: HttpRequest, observation_id) -> JsonResponse:
   try:
@@ -273,6 +341,7 @@ def api_site_observation_detail(request: HttpRequest, observation_id) -> JsonRes
   return JsonResponse({"deleted": True})
 
 
+@management_access_required
 @require_http_methods(["GET"])
 def api_records_export(request: HttpRequest) -> HttpResponse:
   try:
@@ -294,6 +363,13 @@ def build_page_context(active_page: str) -> dict[str, Any]:
     "activity_options": ACTIVITY_TYPE_OPTIONS,
     "activity_catalog": build_activity_catalog_payload(),
   }
+
+
+def get_safe_management_redirect_target(request: HttpRequest) -> str:
+  candidate = request.POST.get("next") or request.GET.get("next") or ""
+  if candidate and url_has_allowed_host_and_scheme(candidate, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+    return candidate
+  return "/management/"
 
 def parse_request_payload(request: HttpRequest) -> tuple[dict[str, Any], Any | None, JsonResponse | None]:
   content_type = (request.content_type or "").lower()

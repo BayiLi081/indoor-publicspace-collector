@@ -15,7 +15,7 @@ const MAX_PREVIEW_DATA_URL_LENGTH = 180000;
 const PREVIEW_DATA_URL_PATTERN = /^data:image\/(jpeg|jpg|png|webp);base64,[a-z0-9+/=]+$/i;
 const AUTO_ACTOR_ID_PATTERN = /^CL(\d+)-P(\d+)$/i;
 const MIN_MAP_ZOOM = 0.25;
-const MAX_MAP_ZOOM = 8;
+const MAX_MAP_ZOOM = 16;
 const MAP_ZOOM_STEP = 0.1;
 const DEFAULT_MAP_ZOOM = 1;
 const WHEEL_ZOOM_SENSITIVITY = 0.0016;

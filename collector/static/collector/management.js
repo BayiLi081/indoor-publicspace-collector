@@ -10,7 +10,7 @@ const ALL_BUILDINGS_ID = "__all_buildings__";
 const ALL_FLOORS_ID = "__all_floors__";
 const AUTO_ACTOR_ID_PATTERN = /^CL(\d+)-P(\d+)$/i;
 const MIN_MAP_ZOOM = 0.25;
-const MAX_MAP_ZOOM = 8;
+const MAX_MAP_ZOOM = 16;
 const MAP_ZOOM_STEP = 0.1;
 const DEFAULT_MAP_ZOOM = 1;
 const WHEEL_ZOOM_SENSITIVITY = 0.0016;
@@ -1251,6 +1251,9 @@ function buildObservationDeleteLabel(observation) {
 async function onExport() {
   try {
     const response = await fetch(API_RECORDS_EXPORT, { credentials: "same-origin" });
+    if (await maybeRedirectToManagementLogin(response)) {
+      return;
+    }
     if (!response.ok) {
       throw new Error(`Export failed (${response.status}).`);
     }
@@ -1739,6 +1742,10 @@ async function apiGet(url) {
     },
   });
 
+  if (await maybeRedirectToManagementLogin(response)) {
+    throw new Error("Management access code required.");
+  }
+
   if (!response.ok) {
     throw new Error(await parseApiError(response));
   }
@@ -1764,12 +1771,18 @@ async function apiRequest(url, { method = "GET", body = null } = {}) {
     }
   }
 
-  return fetch(url, {
+  const response = await fetch(url, {
     method,
     credentials: "same-origin",
     headers,
     body: payload,
   });
+
+  if (await maybeRedirectToManagementLogin(response)) {
+    throw new Error("Management access code required.");
+  }
+
+  return response;
 }
 
 function getCsrfToken() {
@@ -1813,4 +1826,22 @@ async function parseApiError(response) {
   }
 
   return `Request failed (${response.status} ${response.statusText})`;
+}
+
+async function maybeRedirectToManagementLogin(response) {
+  if (response.status !== 401) {
+    return false;
+  }
+
+  try {
+    const payload = await response.clone().json();
+    if (typeof payload.loginUrl === "string" && payload.loginUrl) {
+      window.location.assign(payload.loginUrl);
+      return true;
+    }
+  } catch {
+    // Ignore JSON parsing errors and let normal error handling continue.
+  }
+
+  return false;
 }

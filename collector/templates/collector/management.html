@@ -17,6 +17,10 @@
       <nav class="topnav" aria-label="Primary">
         <a href="{% url 'index' %}"{% if active_page == 'capture' %} class="active"{% endif %}>Capture</a>
         <a href="{% url 'management' %}"{% if active_page == 'management' %} class="active"{% endif %}>Management</a>
+        <form method="post" action="{% url 'management_logout' %}" class="topnav-logout">
+          {% csrf_token %}
+          <button type="submit" class="secondary">Sign Out</button>
+        </form>
       </nav>
     </div>
   </header>

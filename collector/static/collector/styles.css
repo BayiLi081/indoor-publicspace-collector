@@ -147,6 +147,14 @@ body {
   color: #fff;
 }
 
+.topnav-logout {
+  margin: 0;
+}
+
+.topnav-logout button {
+  min-height: 2.4rem;
+}
+
 .layout {
   display: grid;
   grid-template-columns: 2fr 1fr;
