@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-
+import json
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
@@ -118,8 +118,20 @@ WSGI_APPLICATION = "indoor_collector.wsgi.application"
 ASGI_APPLICATION = "indoor_collector.asgi.application"
 
 DB_ENGINE = env_str("DJANGO_DB_ENGINE", "sqlite").lower()
-if DB_ENGINE in {"postgres", "postgresql", "django.db.backends.postgresql"}:
-  db_options = build_db_options()
+db_options = build_db_options()
+if env_str("LOCAL_TEST", False):
+  DATABASES = {
+    "default": {
+      "ENGINE": "django.db.backends.postgresql",
+      "NAME": env_str("DJANGO_DB_NAME", "indoor_activities"),
+      "USER": env_str("DJANGO_LOCAL_DB_USER", "postgres"),
+      "PASSWORD": env_str("DJANGO_LOCAL_DB_PASSWORD", ""),
+      "HOST": env_str("DJANGO_LOCAL_DB_HOST", "127.0.0.1" ),
+      "PORT": env_str("DJANGO_DB_PORT", "5432"),
+      **({"OPTIONS": db_options} if db_options else {}),
+    }  
+  } 
+else:
   DATABASES = {
     "default": {
       "ENGINE": "django.db.backends.postgresql",
@@ -131,13 +143,10 @@ if DB_ENGINE in {"postgres", "postgresql", "django.db.backends.postgresql"}:
       **({"OPTIONS": db_options} if db_options else {}),
     }
   }
-else:
-  DATABASES = {
-    "default": {
-      "ENGINE": "django.db.backends.sqlite3",
-      "NAME": Path(env_str("DJANGO_DB_NAME", str(BASE_DIR / "db.sqlite3"))),
-    }
-  }
+
+# Print the determined database configuration for debugging
+#print("DEBUG: Determined DATABASES configuration:") # New Debug print 1
+#print(json.dumps(DATABASES, indent=2, default=str)) # New Debug print 2
 
 AUTH_PASSWORD_VALIDATORS = []
 

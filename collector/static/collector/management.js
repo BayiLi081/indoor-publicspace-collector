@@ -19,6 +19,22 @@ const PREVIEW_DATA_URL_PATTERN = /^data:image\/(jpeg|jpg|png|webp);base64,[a-z0-
 const ACTIVITY_CATALOG = loadActivityCatalog();
 const ACTIVITY_TYPE_OPTIONS = ACTIVITY_CATALOG.options;
 const ACTIVITY_TYPE_ALIASES = ACTIVITY_CATALOG.aliases;
+const FACIAL_EXPRESSION_LABELS = {
+  happy: "Happy",
+  no_expression: "No expression",
+  unhappy: "Unhappy",
+};
+const FACIAL_EXPRESSION_ALIASES = {
+  happy: "happy",
+  smiling: "happy",
+  smile: "happy",
+  "no expression": "no_expression",
+  "no-expression": "no_expression",
+  no_expression: "no_expression",
+  neutral: "no_expression",
+  unhappy: "unhappy",
+  sad: "unhappy",
+};
 
 const LEGACY_BUILDING_MAPS = {
   [ROOT_BUILDING_ID]: {
@@ -288,6 +304,7 @@ function getFilteredRecords() {
         record.actorId,
         formatGender(record.gender),
         formatAgeGroup(record.ageGroup),
+        formatFacialExpression(record.facialExpression),
         record.notes,
         getBuildingLabel(recordBuildingId),
         getFloorLabel(recordBuildingId, recordFloorId),
@@ -745,6 +762,7 @@ function renderRecordPopupBody(record, clusterSize = 0) {
     ["Activity Type", formatActivityType(record.activityType)],
     ["Gender", formatGender(record.gender)],
     ["Age Group", formatAgeGroup(record.ageGroup)],
+    ["Expression", formatFacialExpression(record.facialExpression)],
     ["Time", formatDate(record.activityTime)],
     ["Group", groupText],
     ["Building", getBuildingLabel(getRecordBuildingId(record))],
@@ -776,7 +794,7 @@ function renderGroupPopupBody(clusterRecords) {
         <article class="management-map-member-card">
           <strong>${escapeHtml(memberLabel)}${record.actorId ? ` · ${escapeHtml(record.actorId)}` : ""}</strong>
           <span>${escapeHtml(formatActivityType(record.activityType))}</span>
-          <span>${escapeHtml(formatGender(record.gender))} | ${escapeHtml(formatAgeGroup(record.ageGroup))}</span>
+          <span>${escapeHtml(formatGender(record.gender))} | ${escapeHtml(formatAgeGroup(record.ageGroup))} | ${escapeHtml(formatFacialExpression(record.facialExpression))}</span>
           <span>${escapeHtml(formatMapLocation(record.location))} | ${escapeHtml(formatDate(record.activityTime))}</span>
         </article>
       `;
@@ -1078,7 +1096,7 @@ function renderRecords() {
 
   if (!filtered.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="12">No records match the current filters.</td>`;
+    tr.innerHTML = `<td colspan="13">No records match the current filters.</td>`;
     recordsTbody.appendChild(tr);
     return;
   }
@@ -1094,6 +1112,7 @@ function renderRecords() {
       <td>${escapeHtml(record.actorId || "-")}</td>
       <td>${escapeHtml(formatGender(record.gender))}</td>
       <td>${escapeHtml(formatAgeGroup(record.ageGroup))}</td>
+      <td>${escapeHtml(formatFacialExpression(record.facialExpression))}</td>
       <td>${escapeHtml(getBuildingLabel(recordBuildingId))}</td>
       <td>${escapeHtml(getFloorLabel(recordBuildingId, recordFloorId))}</td>
       <td>${escapeHtml(formatMapLocation(record.location))}</td>
@@ -1301,6 +1320,7 @@ function normalizeRecord(record) {
     activityType: normalizeActivityTypeValue(record.activityType),
     gender: normalizeGender(record.gender),
     ageGroup: normalizeAgeGroup(record.ageGroup),
+    facialExpression: normalizeFacialExpression(record.facialExpression),
     location: hasMapLocation(record.location) ? { ...record.location } : null,
     photoLocation: isValidPhotoLocation(record.photoLocation) ? { ...record.photoLocation } : null,
     photoName: typeof record.photoName === "string" && record.photoName.trim() ? record.photoName : null,
@@ -1552,6 +1572,11 @@ function formatAgeGroup(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "-";
 }
 
+function formatFacialExpression(value) {
+  const normalized = normalizeFacialExpression(value);
+  return normalized ? FACIAL_EXPRESSION_LABELS[normalized] : "-";
+}
+
 function normalizeActivityTypeValue(value) {
   if (Array.isArray(value)) {
     const normalized = normalizeActivityTypeSelection(value);
@@ -1618,6 +1643,20 @@ function normalizeAgeGroup(value) {
 
   const normalized = value.trim();
   return normalized || null;
+}
+
+function normalizeFacialExpression(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const matched = FACIAL_EXPRESSION_ALIASES[normalized] || normalized;
+  return Object.prototype.hasOwnProperty.call(FACIAL_EXPRESSION_LABELS, matched) ? matched : null;
 }
 
 function formatPhotoPreviewCell(photoUrl, photoPreview, photoName) {

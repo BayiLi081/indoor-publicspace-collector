@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Indoor Activity Location Recorder</title>
-  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260331-1">
+  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260410-1">
 </head>
 <body>
   <header class="topbar">
@@ -97,40 +97,75 @@
         <button id="grpCounterUp" type="button" class="grpcounter-btn" aria-label="Increase group count">+</button>
       </div>
 
+      <div id="groupInteractionPanel" class="group-interaction-panel" hidden>
+        <div class="input-group">
+          <span class="mandatory">Are the group members interacting?</span>
+          <div class="gender-controls" role="group" aria-label="Group interaction">
+            <button type="button" class="toggle-btn group-interaction-btn" data-group-interaction="interacting" aria-pressed="false">Yes, interacting</button>
+            <button type="button" class="toggle-btn group-interaction-btn" data-group-interaction="solitary" aria-pressed="false">No, solitary activities</button>
+          </div>
+          <small class="field-hint">Choose this before selecting group member points.</small>
+        </div>
+
+        <div id="groupActivityTypologyFields" class="input-group" hidden>
+          <span class="mandatory">Group Activity Typology <small>(can select multiple)</small></span>
+          <div class="activity-type-controls" role="group" aria-label="Group activity typology">
+            {% for typology_option in group_activity_typology_options %}
+            <button type="button" class="toggle-btn group-activity-typology-btn" data-group-activity-typology="{{ typology_option }}" aria-pressed="false">{{ typology_option }}</button>
+            {% endfor %}
+          </div>
+          <small class="field-hint">Select one or more shared group activities.</small>
+        </div>
+      </div>
+
       <h2 id="activityFormHeading">Record Activity</h2>
       <input id="recordMode" type="hidden" value="">
       <form id="activityForm">
         {% csrf_token %}
         <div id="individualDetailFields">
           <div class="input-group">
-            <span>Activity Type</span>
+            <span class="mandatory">Activity Type <small>(can select multiple)</small></span>
             <input id="activityType" type="hidden">
+            <div class="activity-category-controls" id="activityCategoryControls" role="group" aria-label="Activity category">
+              <button type="button" class="toggle-btn activity-category-btn" data-activity-category="moving" aria-pressed="false">Moving</button>
+              <button type="button" class="toggle-btn activity-category-btn" data-activity-category="lingering" aria-pressed="false">Lingering</button>
+            </div>
             <div class="activity-type-controls" id="activityTypeControls" role="group" aria-label="Activity type">
               {% for activity_option in activity_options %}
               <button type="button" class="toggle-btn" data-activity-type="{{ activity_option }}" aria-pressed="false">{{ activity_option }}</button>
               {% endfor %}
             </div>
-            <small class="field-hint">Select one or more activities.</small>
+            <small id="activityTypeHint" class="field-hint">Choose Moving or Lingering first.</small>
           </div>
 
           <input id="actorId" type="hidden">
 
           <div class="input-group">
-            <span>Gender</span>
+            <span class="mandatory">Gender</span>
             <div class="gender-controls" id="genderControls">
-              <button type="button" class="toggle-btn" data-gender="male" aria-pressed="false">Male</button>
-              <button type="button" class="toggle-btn" data-gender="female" aria-pressed="false">Female</button>
+              <button type="button" class="toggle-btn gender-btn" data-gender="male" aria-pressed="false" title="Male">👨</button>
+              <button type="button" class="toggle-btn gender-btn" data-gender="female" aria-pressed="false" title="Female">👩</button>
             </div>
           </div>
 
           <div class="input-group">
-            <span>Age Group</span>
+            <span class="mandatory">Age Group</span>
             <input id="ageGroup" type="hidden">
             <div class="gender-controls age-group-controls" id="ageGroupControls" role="group" aria-label="Age group">
               <button type="button" class="toggle-btn" data-age-group="under-10" data-age-label="<10 years old" aria-pressed="false">&lt;10 years old</button>
               <button type="button" class="toggle-btn" data-age-group="10-20" data-age-label="10-20 years old" aria-pressed="false">10-20 years old</button>
               <button type="button" class="toggle-btn" data-age-group="20-60" data-age-label="20-60 years old" aria-pressed="false">20-60 years old</button>
               <button type="button" class="toggle-btn" data-age-group="over-60" data-age-label=">60 years old" aria-pressed="false">&gt;60 years old</button>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <span class="mandatory">Facial Expression</span>
+            <input id="facialExpression" type="hidden">
+            <div class="expression-controls" id="facialExpressionControls" role="group" aria-label="Facial expression">
+              <button type="button" class="toggle-btn expression-btn" data-facial-expression="happy" aria-pressed="false" title="Happy">🙂</button>
+              <button type="button" class="toggle-btn expression-btn" data-facial-expression="no_expression" aria-pressed="false" title="No expression">😐</button>
+              <button type="button" class="toggle-btn expression-btn" data-facial-expression="unhappy" aria-pressed="false" title="Unhappy">🙁</button>
             </div>
           </div>
         </div>
@@ -140,21 +175,28 @@
           <div id="groupPersonList" class="group-person-list"></div>
         </div>
 
-        <label>
-          Date & Time
-          <input id="activityTime" type="datetime-local" required>
-        </label>
+        <input id="activityTime" type="hidden">
 
-        <label>
-          Capture / Upload Image
-          <input id="photoInput" type="file" accept="image/*" capture="environment">
-          <small id="photoLocationStatus" class="photo-status" data-state="muted">No image selected.</small>
-        </label>
-
-        <label>
-          Notes
-          <textarea id="notes" rows="3" placeholder="Optional details"></textarea>
-        </label>
+        <div class="activity-extra-actions">
+          <span>Record Extras</span>
+          <div class="activity-extra-buttons" role="group" aria-label="Activity record extras">
+            <button id="activityCameraBtn" type="button" class="secondary activity-extra-btn" aria-pressed="false" title="Attach an activity photo">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M9 6 10.6 4h2.8L15 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3Zm3 9.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span>Photo</span>
+            </button>
+            <button id="activityNoteBtn" type="button" class="secondary activity-extra-btn" aria-pressed="false" title="Attach an activity note">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M8 4h8l4 4v12a1 1 0 0 1-1 1H8a4 4 0 0 1-4-4V5a1 1 0 0 1 1-1h3Zm1 10h6m-6 3h6m-6-6h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span>Note</span>
+            </button>
+          </div>
+          <small id="photoLocationStatus" class="photo-status" data-state="muted">No photo or note added.</small>
+          <input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
+          <textarea id="notes" hidden></textarea>
+        </div>
 
         <div class="coords">
           <strong>Selected Point(s):</strong>
@@ -181,31 +223,44 @@
           </div>
         </div>
 
-        <div class="input-group">
-          <span>Activity Type</span>
+        <div id="groupPointActivityFields" class="input-group">
+          <span class="mandatory">Activity Type <small>(can select multiple)</small></span>
+          <div class="activity-category-controls" role="group" aria-label="Group member activity category">
+            <button type="button" class="toggle-btn group-point-activity-category-btn" data-group-point-activity-category="moving" aria-pressed="false">Moving</button>
+            <button type="button" class="toggle-btn group-point-activity-category-btn" data-group-point-activity-category="lingering" aria-pressed="false">Lingering</button>
+          </div>
           <div class="activity-type-controls" role="group" aria-label="Group member activity type">
             {% for activity_option in activity_options %}
             <button type="button" class="toggle-btn group-point-activity-btn" data-group-point-activity-type="{{ activity_option }}" aria-pressed="false">{{ activity_option }}</button>
             {% endfor %}
           </div>
-          <small class="field-hint">Select one or more activities for this person.</small>
+          <small id="groupPointActivityHint" class="field-hint">Choose Moving or Lingering first.</small>
         </div>
 
         <div class="input-group">
-          <span>Gender</span>
+          <span class="mandatory">Gender</span>
           <div class="gender-controls" role="group" aria-label="Group member gender">
-            <button type="button" class="toggle-btn group-point-gender-btn" data-group-point-gender="male" aria-pressed="false">Male</button>
-            <button type="button" class="toggle-btn group-point-gender-btn" data-group-point-gender="female" aria-pressed="false">Female</button>
+            <button type="button" class="toggle-btn gender-btn group-point-gender-btn" data-group-point-gender="male" aria-pressed="false" title="Male">👨</button>
+            <button type="button" class="toggle-btn gender-btn group-point-gender-btn" data-group-point-gender="female" aria-pressed="false" title="Female">👩</button>
           </div>
         </div>
 
         <div class="input-group">
-          <span>Age Group</span>
+          <span class="mandatory">Age Group</span>
           <div class="gender-controls age-group-controls" role="group" aria-label="Group member age group">
             <button type="button" class="toggle-btn group-point-age-btn" data-group-point-age-group="under-10" data-group-point-age-label="<10 years old" aria-pressed="false">&lt;10 years old</button>
             <button type="button" class="toggle-btn group-point-age-btn" data-group-point-age-group="10-20" data-group-point-age-label="10-20 years old" aria-pressed="false">10-20 years old</button>
             <button type="button" class="toggle-btn group-point-age-btn" data-group-point-age-group="20-60" data-group-point-age-label="20-60 years old" aria-pressed="false">20-60 years old</button>
             <button type="button" class="toggle-btn group-point-age-btn" data-group-point-age-group="over-60" data-group-point-age-label=">60 years old" aria-pressed="false">&gt;60 years old</button>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <span class="mandatory">Facial Expression</span>
+          <div class="expression-controls" role="group" aria-label="Group member facial expression">
+            <button type="button" class="toggle-btn expression-btn group-point-expression-btn" data-group-point-facial-expression="happy" aria-pressed="false" title="Happy">🙂</button>
+            <button type="button" class="toggle-btn expression-btn group-point-expression-btn" data-group-point-facial-expression="no_expression" aria-pressed="false" title="No expression">😐</button>
+            <button type="button" class="toggle-btn expression-btn group-point-expression-btn" data-group-point-facial-expression="unhappy" aria-pressed="false" title="Unhappy">🙁</button>
           </div>
         </div>
 
@@ -251,7 +306,66 @@
     </div>
   </div>
 
+  <div id="activityNoteModal" class="modal-shell" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-activity-note-close></div>
+    <div class="modal-card observation-modal-card" role="dialog" aria-modal="true" aria-labelledby="activityNoteModalTitle">
+      <form id="activityNoteForm" class="activity-note-form">
+        <div class="modal-head">
+          <div>
+            <h3 id="activityNoteModalTitle">Activity Note</h3>
+            <p class="modal-subtitle">Attached to the current activity record.</p>
+          </div>
+        </div>
+
+        <label>
+          Note
+          <textarea id="activityNoteText" rows="5" placeholder="Optional details for this activity record."></textarea>
+        </label>
+
+        <p id="activityNotePrompt" class="save-prompt" data-state="muted" role="status" aria-live="polite"></p>
+
+        <div class="actions modal-actions">
+          <button id="activityNoteClearBtn" type="button" class="secondary">Clear Note</button>
+          <button id="activityNoteCancelBtn" type="button" class="secondary">Cancel</button>
+          <button id="activityNoteSaveBtn" type="submit">Attach Note</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="submitReviewModal" class="modal-shell" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-submit-review-close></div>
+    <div class="modal-card submit-review-modal-card" role="dialog" aria-modal="true" aria-labelledby="submitReviewModalTitle">
+      <div class="modal-head">
+        <div>
+          <h3 id="submitReviewModalTitle">Review Record</h3>
+          <p class="modal-subtitle">Check the details before submitting.</p>
+        </div>
+      </div>
+      <div id="submitReviewBody" class="submit-review-body"></div>
+      <div class="actions modal-actions">
+        <button id="submitReviewEditBtn" type="button" class="secondary">Edit</button>
+        <button id="submitReviewConfirmBtn" type="button">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="submitSuccessModal" class="modal-shell" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-submit-success-close></div>
+    <div class="modal-card submit-success-modal-card" role="dialog" aria-modal="true" aria-labelledby="submitSuccessModalTitle">
+      <div class="modal-head">
+        <div>
+          <h3 id="submitSuccessModalTitle">Submitted</h3>
+          <p id="submitSuccessMessage" class="modal-subtitle">Record saved successfully.</p>
+        </div>
+      </div>
+      <div class="actions modal-actions">
+        <button id="submitSuccessCloseBtn" type="button">OK</button>
+      </div>
+    </div>
+  </div>
+
   {{ activity_catalog|json_script:"activityCatalogData" }}
-  <script type="module" src="{% static 'collector/app.js' %}?v=20260331-1"></script>
+  <script type="module" src="{% static 'collector/app.js' %}?v=20260410-1"></script>
 </body>
 </html>

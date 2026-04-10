@@ -14,6 +14,8 @@ class ActivityRecord(models.Model):
   actor_id = models.CharField(max_length=128, blank=True)
   gender = models.CharField(max_length=16, blank=True, default="")
   age_group = models.CharField(max_length=32, blank=True, default="")
+  ethnic_group = models.CharField(max_length=50,blank=True, default="")
+  facial_expression = models.CharField(max_length=16, blank=True, default="")
   activity_time = models.DateTimeField(db_index=True)
   notes = models.TextField(blank=True)
 

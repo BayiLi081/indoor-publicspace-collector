@@ -20,6 +20,8 @@ from django.views.decorators.http import require_http_methods
 from .activity_catalog import (
   ACTIVITY_TYPE_ALIASES,
   ACTIVITY_TYPE_OPTIONS,
+  GROUP_ACTIVITY_TYPOLOGY_OPTIONS,
+  INDIVIDUAL_ACTIVITY_TYPE_OPTIONS,
   build_activity_catalog_payload,
 )
 from .building_catalog import discover_building_maps as discover_building_maps_catalog
@@ -45,6 +47,19 @@ ALLOWED_AGE_GROUPS = {
   "10-20 years old",
   "20-60 years old",
   ">60 years old",
+}
+ALLOWED_ETHNIC_GROUPS = {"Chinese", "Malay", "Indian", "Others"}
+ALLOWED_FACIAL_EXPRESSIONS = {"happy", "no_expression", "unhappy"}
+FACIAL_EXPRESSION_ALIASES = {
+  "happy": "happy",
+  "smiling": "happy",
+  "smile": "happy",
+  "no expression": "no_expression",
+  "no-expression": "no_expression",
+  "no_expression": "no_expression",
+  "neutral": "no_expression",
+  "unhappy": "unhappy",
+  "sad": "unhappy",
 }
 MAP_EXTENSION_PRIORITY = {
   ".svg": 0,
@@ -117,6 +132,7 @@ def management(request: HttpRequest) -> HttpResponse:
 
 @require_http_methods(["GET"])
 def api_buildings(request: HttpRequest) -> JsonResponse:
+  print("DEBUG: Entered api_buildings view.") # New Debug print 1
   building_maps = discover_building_maps_catalog()
   return JsonResponse({"buildings": building_maps})
 
@@ -177,6 +193,7 @@ def api_records(request: HttpRequest) -> JsonResponse:
           | Q(actor_id__icontains=search_text)
           | Q(gender__icontains=search_text)
           | Q(age_group__icontains=search_text)
+          | Q(facial_expression__icontains=search_text)
           | Q(notes__icontains=search_text)
           | Q(photo_name__icontains=search_text)
           | Q(building_id__icontains=search_text)
@@ -360,7 +377,8 @@ def api_records_export(request: HttpRequest) -> HttpResponse:
 def build_page_context(active_page: str) -> dict[str, Any]:
   return {
     "active_page": active_page,
-    "activity_options": ACTIVITY_TYPE_OPTIONS,
+    "activity_options": INDIVIDUAL_ACTIVITY_TYPE_OPTIONS,
+    "group_activity_typology_options": GROUP_ACTIVITY_TYPOLOGY_OPTIONS,
     "activity_catalog": build_activity_catalog_payload(),
   }
 
@@ -448,6 +466,8 @@ def build_record_from_payload(
   actor_id = optional_string(payload.get("actorId"))
   gender = parse_gender(payload.get("gender"))
   age_group = parse_age_group(payload.get("ageGroup"))
+  ethnic_group = parse_ethnic_group(payload.get("ethnicGroup"))
+  facial_expression = parse_facial_expression(payload.get("facialExpression", payload.get("expression")))
   notes = optional_string(payload.get("notes"))
   activity_time = parse_required_datetime(payload.get("activityTime"), "activityTime")
 
@@ -470,6 +490,8 @@ def build_record_from_payload(
     actor_id=actor_id,
     gender=gender,
     age_group=age_group,
+    ethnic_group=ethnic_group,
+    facial_expression=facial_expression,
     activity_time=activity_time,
     notes=notes,
     location_x_pct=location_x_pct,
@@ -594,6 +616,31 @@ def parse_age_group(value: Any) -> str:
   if normalized not in ALLOWED_AGE_GROUPS:
     raise ValidationError({"ageGroup": ["Age group is invalid."]})
   return normalized
+
+def parse_ethnic_group(value: Any) -> str:
+  """Parses and validates the ethnic group field."""
+  if not isinstance(value, str):
+    # If not a string, it's considered empty/optional.
+    return ""
+
+  normalized = value.strip()
+  if not normalized:
+    return ""
+
+  if normalized not in ALLOWED_ETHNIC_GROUPS:
+    raise ValidationError({"ethnicGroup": [f"Ethnic group must be one of: {','.join(ALLOWED_ETHNIC_GROUPS)}."]})
+  return normalized
+
+
+def parse_facial_expression(value: Any) -> str:
+  if not isinstance(value, str):
+    raise ValidationError({"facialExpression": ["Facial expression is required."]})
+
+  normalized = value.strip().lower()
+  matched = FACIAL_EXPRESSION_ALIASES.get(normalized, normalized)
+  if matched not in ALLOWED_FACIAL_EXPRESSIONS:
+    raise ValidationError({"facialExpression": ["Facial expression must be happy, no expression, or unhappy."]})
+  return matched
 
 
 def parse_required_datetime(value: Any, key: str):
@@ -727,6 +774,8 @@ def serialize_record(record: ActivityRecord) -> dict[str, Any]:
     "actorId": record.actor_id,
     "gender": record.gender or None,
     "ageGroup": record.age_group or None,
+    "ethnicGroup": record.ethnic_group or None,
+    "facialExpression": record.facial_expression or None,
     "activityTime": isoformat_utc(record.activity_time),
     "notes": record.notes,
     "location": location,
@@ -775,6 +824,7 @@ def isoformat_utc(value):
 
 
 def discover_building_maps() -> dict[str, Any]:
+  print("DEBUG: Entered discover_building_maps function.") # New Debug print 2
   manifest_maps = discover_buildings_from_manifest()
   if has_any_building_floors(manifest_maps):
     return normalize_building_maps(manifest_maps)
@@ -837,29 +887,50 @@ def discover_buildings_from_assets_folder() -> dict[str, Any]:
 
 
 def extract_floor_maps(folder: Path) -> dict[str, Any]:
+  print(f"DEBUG: Extracting floor maps from folder: {folder}") # Debug print 1
   floors: dict[str, Any] = {}
+  try:
+    file_entries = sorted(
+      [entry for entry in folder.iterdir() if entry.is_file() and entry.suffix.lower() in MAP_EXTENSIONS],
+      key=lambda entry: (
+        natural_sort_key(entry.stem),
+        MAP_EXTENSION_PRIORITY.get(entry.suffix.lower(), 999),
+        natural_sort_key(entry.name),
+      ),
+    )
+    print(f"DEBUG: Found file entries in {folder}: {[entry.name for entry in file_entries]}") # Debug print 2
 
-  file_entries = sorted(
-    [entry for entry in folder.iterdir() if entry.is_file() and entry.suffix.lower() in MAP_EXTENSIONS],
-    key=lambda entry: (
-      natural_sort_key(entry.stem),
-      MAP_EXTENSION_PRIORITY.get(entry.suffix.lower(), 999),
-      natural_sort_key(entry.name),
-    ),
-  )
+    for file_entry in file_entries:
+      print(f"DEBUG: Processing file: {file_entry.name} in {folder}") # Debug print 3
+      if file_entry.stem in floors:
+        print(f"DEBUG: Skipping duplicate floor ID: {file_entry.stem}") # Debug print 4
+        continue
 
-  for file_entry in file_entries:
-    floor_id = file_entry.stem
-    if floor_id in floors:
-      continue
+      floor_id = file_entry.stem
+      floor_map_path = resolve_floor_map_path(file_entry)
+      print(f"DEBUG: resolve_floor_map_path returned: {floor_map_path}") # Debug print 5
 
-    floor_map_path = resolve_floor_map_path(file_entry)
-    relative_path = floor_map_path.relative_to(settings.ASSETS_DIR).as_posix()
-    floors[floor_id] = {
-      "label": format_floor_label(floor_id),
-      "mapSrc": f"/assets/{relative_path}",
-    }
+      # This section is critical for path resolution.
+      try:
+          relative_path = floor_map_path.relative_to(settings.ASSETS_DIR).as_posix()
+          mapSrc = f"/assets/{relative_path}"
+          print(f"DEBUG: Calculated relative_path: {relative_path}, mapSrc: {mapSrc}") # Debug print 6
+          floors[floor_id] = {
+            "label": format_floor_label(floor_id),
+            "mapSrc": mapSrc,
+          }
+      except ValueError as ve:
+          print(f"DEBUG: ValueError during relative_to for {file_entry.name} in {folder}. Error: {ve}") # Debug print 7
+          print(f"DEBUG: file_entry: {file_entry}, settings.ASSETS_DIR: {settings.ASSETS_DIR}") # Debug print 8
+      except Exception as e:
+          print(f"DEBUG: Unexpected error during path processing for {file_entry.name} in {folder}. Error: {e}") # Debug print 9
 
+  except Exception as e:
+    print(f"DEBUG: UNHANDLED EXCEPTION in extract_floor_maps for folder {folder}. Error: {e}") # Debug print 10
+    # Returning empty floors to ensure consistent behavior on error.
+    return {} 
+
+  print(f"DEBUG: Finished extract_floor_maps for folder {folder}. Floors found: {len(floors)}") # Debug print 11
   return floors
 
 
