@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Indoor Activity Location Recorder</title>
-  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260410-1">
+  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260413-1">
 </head>
 <body>
   <header class="topbar">
@@ -22,20 +22,33 @@
   </header>
 
   <aside class="observation-fab-stack" aria-label="Site observation tools">
-    <div class="observation-fab-row" role="group" aria-label="Site observation actions">
-      <button id="observationCameraBtn" type="button" class="fab-button" title="Take a site observation photo">
+    <div id="observationFabMenu" class="observation-fab-actions" role="group" aria-label="Site observation actions" hidden>
+      <button id="observationCameraBtn" type="button" class="secondary observation-action-button" title="Take a site observation photo">
+        <span>Take Photo</span>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M9 6 10.6 4h2.8L15 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3Zm3 9.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <span class="sr-only">Take a site observation photo</span>
       </button>
-      <button id="observationNoteBtn" type="button" class="fab-button fab-button-note secondary" title="Save a site observation note">
+      <button id="observationNoteBtn" type="button" class="secondary observation-action-button" title="Save a site observation note">
+        <span>Save Note</span>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M8 4h8l4 4v12a1 1 0 0 1-1 1H8a4 4 0 0 1-4-4V5a1 1 0 0 1 1-1h3Zm1 10h6m-6 3h6m-6-6h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <span class="sr-only">Save a site observation note</span>
+      </button>
+      <button id="observationQuestionsBtn" type="button" class="secondary observation-action-button" title="Answer short Qs">
+        <span>Answer Short Qs</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M5 6.5h14M5 12h14M5 17.5h14M8 4.5v4M16 10v4M11 15.5v4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
       </button>
     </div>
+    <button id="observationMenuBtn" type="button" class="fab-button observation-menu-button" aria-expanded="false" aria-controls="observationFabMenu" title="Site observation tools">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M3.5 12s3.2-5 8.5-5 8.5 5 8.5 5-3.2 5-8.5 5-8.5-5-8.5-5Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12 9.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6Z" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      </svg>
+      <span class="sr-only">Open site observation tools</span>
+    </button>
     <p id="observationStatus" class="observation-status" data-state="muted" role="status" aria-live="polite"></p>
     <input id="observationPhotoInput" type="file" accept="image/*" capture="environment" hidden>
   </aside>
@@ -291,10 +304,60 @@
           <p id="observationContext">No building or floor selected.</p>
         </div>
 
-        <label>
+        <label id="observationNoteField">
           Observation Note
           <textarea id="observationNote" rows="5" placeholder="Add a quick note about the site. This will be saved as a site observation."></textarea>
         </label>
+
+        <fieldset id="observationQuestionsField" class="observation-questions" hidden>
+          <legend>Short Qs</legend>
+          <div class="observation-question-grid">
+            <label>
+              Seating availability
+              <input id="observationSeatingAvailability" type="hidden" data-observation-question="seatingAvailability">
+              <span class="observation-rating-options" role="group" aria-label="Seating availability">
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="seatingAvailability" data-observation-rating-value="1" aria-pressed="false">1</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="seatingAvailability" data-observation-rating-value="2" aria-pressed="false">2</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="seatingAvailability" data-observation-rating-value="3" aria-pressed="false">3</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="seatingAvailability" data-observation-rating-value="4" aria-pressed="false">4</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="seatingAvailability" data-observation-rating-value="5" aria-pressed="false">5</button>
+              </span>
+            </label>
+            <label>
+              Greenery level
+              <input id="observationGreeneryLevel" type="hidden" data-observation-question="greeneryLevel">
+              <span class="observation-rating-options" role="group" aria-label="Greenery level">
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="greeneryLevel" data-observation-rating-value="1" aria-pressed="false">1</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="greeneryLevel" data-observation-rating-value="2" aria-pressed="false">2</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="greeneryLevel" data-observation-rating-value="3" aria-pressed="false">3</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="greeneryLevel" data-observation-rating-value="4" aria-pressed="false">4</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="greeneryLevel" data-observation-rating-value="5" aria-pressed="false">5</button>
+              </span>
+            </label>
+            <label>
+              Noise level
+              <input id="observationNoiseLevel" type="hidden" data-observation-question="noiseLevel">
+              <span class="observation-rating-options" role="group" aria-label="Noise level">
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="noiseLevel" data-observation-rating-value="1" aria-pressed="false">1</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="noiseLevel" data-observation-rating-value="2" aria-pressed="false">2</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="noiseLevel" data-observation-rating-value="3" aria-pressed="false">3</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="noiseLevel" data-observation-rating-value="4" aria-pressed="false">4</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="noiseLevel" data-observation-rating-value="5" aria-pressed="false">5</button>
+              </span>
+            </label>
+            <label>
+              Cleanliness
+              <input id="observationCleanliness" type="hidden" data-observation-question="cleanliness">
+              <span class="observation-rating-options" role="group" aria-label="Cleanliness">
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="cleanliness" data-observation-rating-value="1" aria-pressed="false">1</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="cleanliness" data-observation-rating-value="2" aria-pressed="false">2</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="cleanliness" data-observation-rating-value="3" aria-pressed="false">3</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="cleanliness" data-observation-rating-value="4" aria-pressed="false">4</button>
+                <button type="button" class="observation-rating-circle" data-observation-rating-key="cleanliness" data-observation-rating-value="5" aria-pressed="false">5</button>
+              </span>
+            </label>
+          </div>
+        </fieldset>
 
         <p id="observationPrompt" class="save-prompt" data-state="muted" role="status" aria-live="polite"></p>
 
@@ -366,6 +429,6 @@
   </div>
 
   {{ activity_catalog|json_script:"activityCatalogData" }}
-  <script type="module" src="{% static 'collector/app.js' %}?v=20260410-1"></script>
+  <script type="module" src="{% static 'collector/app.js' %}?v=20260413-1"></script>
 </body>
 </html>

@@ -40,7 +40,13 @@ from .object_storage import build_image_object_url, delete_image_object, save_up
 ROOT_BUILDING_ID = "__root__"
 MAP_EXTENSIONS = {".svg", ".png", ".jpg", ".jpeg", ".webp"}
 MAX_PHOTO_PREVIEW_LENGTH = 180_000
-ALLOWED_OBSERVATION_TYPES = {"photo", "note"}
+ALLOWED_OBSERVATION_TYPES = {"photo", "note", "questions"}
+SHORT_QUESTION_RESPONSE_FIELDS = (
+  ("seatingAvailability", "seating_availability"),
+  ("greeneryLevel", "greenery_level"),
+  ("noiseLevel", "noise_level"),
+  ("cleanliness", "cleanliness"),
+)
 ALLOWED_GENDERS = {"male", "female"}
 ALLOWED_AGE_GROUPS = {
   "<10 years old",
@@ -521,6 +527,10 @@ def build_site_observation_from_payload(
   photo_preview_data_url = parse_photo_preview(payload.get("photoPreview"))
   photo_location = payload.get("photoLocation")
   photo_latitude, photo_longitude, photo_altitude = parse_photo_location(photo_location)
+  short_question_responses = parse_short_question_responses(
+    payload.get("shortQuestionResponses"),
+    observation_type,
+  )
 
   return SiteObservation(
     building_id=building_id,
@@ -534,6 +544,7 @@ def build_site_observation_from_payload(
     photo_latitude=photo_latitude,
     photo_longitude=photo_longitude,
     photo_altitude=photo_altitude,
+    **short_question_responses,
   )
 
 
@@ -556,9 +567,53 @@ def parse_observation_type(value: Any) -> str:
 
   normalized = value.strip().lower()
   if normalized not in ALLOWED_OBSERVATION_TYPES:
-    raise ValidationError({"observationType": ["Observation type must be either 'photo' or 'note'."]})
+    raise ValidationError({"observationType": ["Observation type must be 'photo', 'note', or 'questions'."]})
 
   return normalized
+
+
+def parse_short_question_responses(value: Any, observation_type: str) -> dict[str, int]:
+  if observation_type != "questions":
+    return {}
+
+  if not isinstance(value, dict):
+    raise ValidationError({"shortQuestionResponses": ["Answer all short Qs from 1 to 5."]})
+
+  parsed_values: dict[str, int] = {}
+  errors: dict[str, list[str]] = {}
+
+  for payload_key, model_field in SHORT_QUESTION_RESPONSE_FIELDS:
+    raw_value = value.get(payload_key)
+    error_key = f"shortQuestionResponses.{payload_key}"
+
+    if raw_value is None or (isinstance(raw_value, str) and not raw_value.strip()):
+      errors[error_key] = ["This answer is required."]
+      continue
+
+    if isinstance(raw_value, bool):
+      errors[error_key] = ["Answer must be between 1 and 5."]
+      continue
+
+    if isinstance(raw_value, float) and not raw_value.is_integer():
+      errors[error_key] = ["Answer must be between 1 and 5."]
+      continue
+
+    try:
+      parsed_value = int(raw_value)
+    except (TypeError, ValueError):
+      errors[error_key] = ["Answer must be between 1 and 5."]
+      continue
+
+    if parsed_value < 1 or parsed_value > 5:
+      errors[error_key] = ["Answer must be between 1 and 5."]
+      continue
+
+    parsed_values[model_field] = parsed_value
+
+  if errors:
+    raise ValidationError(errors)
+
+  return parsed_values
 
 
 def parse_activity_type(value: Any) -> str:
@@ -797,6 +852,13 @@ def serialize_site_observation(observation: SiteObservation) -> dict[str, Any]:
     if observation.photo_altitude is not None:
       photo_location["altitude"] = float(observation.photo_altitude)
 
+  short_question_responses = None
+  if any(getattr(observation, model_field) is not None for _, model_field in SHORT_QUESTION_RESPONSE_FIELDS):
+    short_question_responses = {
+      payload_key: getattr(observation, model_field)
+      for payload_key, model_field in SHORT_QUESTION_RESPONSE_FIELDS
+    }
+
   return {
     "id": str(observation.id),
     "createdAt": isoformat_utc(observation.created_at),
@@ -810,6 +872,7 @@ def serialize_site_observation(observation: SiteObservation) -> dict[str, Any]:
     "photoUrl": build_image_object_url(observation.photo_object_name),
     "photoPreview": observation.photo_preview_data_url or None,
     "photoLocation": photo_location,
+    "shortQuestionResponses": short_question_responses,
   }
 
 

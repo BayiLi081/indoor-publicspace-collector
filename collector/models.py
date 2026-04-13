@@ -55,6 +55,7 @@ class SiteObservation(models.Model):
   OBSERVATION_TYPE_CHOICES = (
     ("photo", "Photo"),
     ("note", "Note"),
+    ("questions", "Short Qs"),
   )
 
   id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -70,6 +71,10 @@ class SiteObservation(models.Model):
   photo_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
   photo_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
   photo_altitude = models.DecimalField(max_digits=9, decimal_places=2, null=True, blank=True)
+  seating_availability = models.PositiveSmallIntegerField(null=True, blank=True)
+  greenery_level = models.PositiveSmallIntegerField(null=True, blank=True)
+  noise_level = models.PositiveSmallIntegerField(null=True, blank=True)
+  cleanliness = models.PositiveSmallIntegerField(null=True, blank=True)
 
   class Meta:
     ordering = ["-observation_time", "-created_at"]
@@ -80,9 +85,20 @@ class SiteObservation(models.Model):
     has_photo_preview = bool((self.photo_preview_data_url or "").strip())
     has_photo_lat = self.photo_latitude is not None
     has_photo_lng = self.photo_longitude is not None
+    question_fields = {
+      "seating_availability": self.seating_availability,
+      "greenery_level": self.greenery_level,
+      "noise_level": self.noise_level,
+      "cleanliness": self.cleanliness,
+    }
+    has_question_answers = any(value is not None for value in question_fields.values())
 
     if has_photo_lat != has_photo_lng:
       raise ValidationError("Both photo latitude and longitude must be provided together.")
+
+    for field_name, value in question_fields.items():
+      if value is not None and not 1 <= value <= 5:
+        raise ValidationError({field_name: ["Answer must be between 1 and 5."]})
 
     if self.observation_type == "note" and not has_note:
       raise ValidationError({"note": ["A note is required for note observations."]})
@@ -90,8 +106,15 @@ class SiteObservation(models.Model):
     if self.observation_type == "photo" and not has_photo_preview and not has_photo_object:
       raise ValidationError({"photoObjectName": ["A stored image is required for photo observations."]})
 
-    if not has_note and not has_photo_preview and not has_photo_object:
-      raise ValidationError("A note or photo is required.")
+    if self.observation_type == "questions":
+      missing_fields = [field_name for field_name, value in question_fields.items() if value is None]
+      if missing_fields:
+        raise ValidationError({field_name: ["This short Q answer is required."] for field_name in missing_fields})
+      if not (has_photo_lat and has_photo_lng):
+        raise ValidationError({"photoLocation": ["Current device GPS is required for short Q observations."]})
+
+    if not has_note and not has_photo_preview and not has_photo_object and not has_question_answers:
+      raise ValidationError("A note, photo, or short Q answer is required.")
 
   def __str__(self) -> str:
     observation_label = self.observation_type.title()

@@ -4,6 +4,12 @@ const API_BUILDINGS = "/api/buildings/";
 const API_RECORDS = "/api/records/";
 const API_RECORDS_EXPORT = "/api/records/export/";
 const API_SITE_OBSERVATIONS = "/api/site-observations/";
+const OBSERVATION_QUESTIONS = [
+  { key: "seatingAvailability", label: "Seating availability" },
+  { key: "greeneryLevel", label: "Greenery level" },
+  { key: "noiseLevel", label: "Noise level" },
+  { key: "cleanliness", label: "Cleanliness" },
+];
 
 const ROOT_BUILDING_ID = "__root__";
 const ALL_BUILDINGS_ID = "__all_buildings__";
@@ -344,6 +350,8 @@ function getFilteredObservations() {
         observation.observationType,
         observation.note,
         observation.photoName,
+        formatShortQuestionResponses(observation.shortQuestionResponses),
+        formatPhotoLocationText(observation.photoLocation, observation.photoName),
         getObservationContextText(observation),
         formatDate(observation.observationTime || observation.createdAt),
       ]
@@ -1144,7 +1152,9 @@ function renderSiteObservations(filteredObservations = getFilteredObservations()
 
   filteredObservations.forEach((observation) => {
     const imageSource = observation.photoUrl || observation.photoPreview;
-    const observationTypeLabel = observation.observationType === "photo" ? "Photo" : "Note";
+    const observationTypeLabel = getObservationTypeLabel(observation);
+    const observationBodyText = getObservationBodyText(observation);
+    const mediaPlaceholder = observation.observationType === "questions" ? "Short Qs" : "No photo";
     const card = document.createElement("article");
     card.className = "observation-card";
     card.innerHTML = `
@@ -1162,13 +1172,13 @@ function renderSiteObservations(filteredObservations = getFilteredObservations()
                 >
               </button>
             `
-            : `<div class="observation-photo-placeholder">No photo</div>`
+            : `<div class="observation-photo-placeholder">${escapeHtml(mediaPlaceholder)}</div>`
         }
       </div>
       <div class="observation-card-copy">
         <p class="observation-card-meta">${escapeHtml(formatDate(observation.observationTime || observation.createdAt))}</p>
         <p class="observation-card-context">${escapeHtml(getObservationContextText(observation))}</p>
-        <p class="observation-card-note">${escapeHtml(truncateWords(observation.note || "No note added.", 100))}</p>
+        <p class="observation-card-note">${escapeHtml(truncateWords(observationBodyText, 100))}</p>
         <div class="observation-card-actions">
           <span class="observation-card-type">${escapeHtml(observationTypeLabel)}</span>
           <button type="button" class="danger observation-delete-btn" data-delete-observation-id="${escapeHtml(observation.id)}">Delete</button>
@@ -1264,6 +1274,10 @@ function buildObservationDeleteLabel(observation) {
     return observation.photoName ? `photo observation ${observation.photoName}` : "this photo observation";
   }
 
+  if (observation.observationType === "questions") {
+    return "this short Q observation";
+  }
+
   return "this note observation";
 }
 
@@ -1335,7 +1349,9 @@ function normalizeObservation(observation) {
   }
 
   const normalizedType =
-    observation.observationType === "photo" || observation.observationType === "note"
+    observation.observationType === "photo" ||
+    observation.observationType === "note" ||
+    observation.observationType === "questions"
       ? observation.observationType
       : "note";
 
@@ -1350,7 +1366,59 @@ function normalizeObservation(observation) {
       typeof observation.photoName === "string" && observation.photoName.trim() ? observation.photoName.trim() : null,
     photoUrl: normalizePhotoUrl(observation.photoUrl),
     photoPreview: normalizePhotoPreview(observation.photoPreview),
+    photoLocation: isValidPhotoLocation(observation.photoLocation) ? { ...observation.photoLocation } : null,
+    shortQuestionResponses: normalizeShortQuestionResponses(observation.shortQuestionResponses),
   };
+}
+
+function getObservationTypeLabel(observation) {
+  if (observation.observationType === "photo") {
+    return "Photo";
+  }
+  if (observation.observationType === "questions") {
+    return "Short Qs";
+  }
+  return "Note";
+}
+
+function getObservationBodyText(observation) {
+  if (observation.observationType === "questions") {
+    return formatShortQuestionResponses(observation.shortQuestionResponses) || "No answers saved.";
+  }
+
+  return observation.note || "No note added.";
+}
+
+function formatShortQuestionResponses(responses) {
+  if (!responses || typeof responses !== "object") {
+    return "";
+  }
+
+  return OBSERVATION_QUESTIONS.map((question) => {
+    const value = responses[question.key];
+    return Number.isInteger(value) ? `${question.label}: ${value}/5` : "";
+  })
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function normalizeShortQuestionResponses(responses) {
+  if (!responses || typeof responses !== "object" || Array.isArray(responses)) {
+    return null;
+  }
+
+  const normalized = {};
+  let hasAnswer = false;
+
+  OBSERVATION_QUESTIONS.forEach((question) => {
+    const value = Number.parseInt(responses[question.key], 10);
+    if (Number.isInteger(value) && value >= 1 && value <= 5) {
+      normalized[question.key] = value;
+      hasAnswer = true;
+    }
+  });
+
+  return hasAnswer ? normalized : null;
 }
 
 function normalizeBuildingMaps(rawMaps) {
@@ -1482,14 +1550,16 @@ function getObservationFloorId(observation) {
 function getObservationContextText(observation) {
   const buildingId = getObservationBuildingId(observation);
   const floorId = getObservationFloorId(observation);
+  const gpsText = formatPhotoLocationText(observation?.photoLocation, observation?.photoName);
+  const gpsSuffix = gpsText !== "-" ? ` | GPS: ${gpsText}` : "";
 
   if (buildingId && floorId) {
-    return `${getBuildingLabel(buildingId)} / ${getFloorLabel(buildingId, floorId)}`;
+    return `${getBuildingLabel(buildingId)} / ${getFloorLabel(buildingId, floorId)}${gpsSuffix}`;
   }
   if (buildingId) {
-    return getBuildingLabel(buildingId);
+    return `${getBuildingLabel(buildingId)}${gpsSuffix}`;
   }
-  return "No map context";
+  return `No map context${gpsSuffix}`;
 }
 
 function getObservationSortValue(observation) {

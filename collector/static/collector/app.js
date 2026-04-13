@@ -7,6 +7,14 @@ const API_RECORDS_EXPORT = "/api/records/export/";
 const API_SITE_OBSERVATIONS = "/api/site-observations/";
 const DEFAULT_LOCATE_STATUS_MESSAGE = "Use Locate via GPS for your approximate spot, or Locate via POI to show named places.";
 const DEFAULT_OBSERVATION_STATUS_MESSAGE = "Site Observations";
+const OBSERVATION_MODAL_MODE_NOTE = "note";
+const OBSERVATION_MODAL_MODE_QUESTIONS = "questions";
+const OBSERVATION_QUESTIONS = [
+  { key: "seatingAvailability", label: "Seating availability" },
+  { key: "greeneryLevel", label: "Greenery level" },
+  { key: "noiseLevel", label: "Noise level" },
+  { key: "cleanliness", label: "Cleanliness" },
+];
 
 const ROOT_BUILDING_ID = "__root__";
 const DEFAULT_BUILDING_ID = "SUTD";
@@ -129,14 +137,23 @@ const groupPointActivityHint = document.getElementById("groupPointActivityHint")
 const groupPointGenderButtons = Array.from(document.querySelectorAll(".group-point-gender-btn"));
 const groupPointAgeButtons = Array.from(document.querySelectorAll(".group-point-age-btn"));
 const groupPointExpressionButtons = Array.from(document.querySelectorAll(".group-point-expression-btn"));
+const observationFabStack = document.querySelector(".observation-fab-stack");
+const observationMenuBtn = document.getElementById("observationMenuBtn");
+const observationFabMenu = document.getElementById("observationFabMenu");
 const observationCameraBtn = document.getElementById("observationCameraBtn");
 const observationNoteBtn = document.getElementById("observationNoteBtn");
+const observationQuestionsBtn = document.getElementById("observationQuestionsBtn");
 const observationStatus = document.getElementById("observationStatus");
 const observationPhotoInput = document.getElementById("observationPhotoInput");
 const observationModal = document.getElementById("observationModal");
 const observationForm = document.getElementById("observationForm");
+const observationModalTitle = document.getElementById("observationModalTitle");
 const observationContext = document.getElementById("observationContext");
+const observationNoteField = document.getElementById("observationNoteField");
 const observationNote = document.getElementById("observationNote");
+const observationQuestionsField = document.getElementById("observationQuestionsField");
+const observationQuestionInputs = Array.from(document.querySelectorAll("[data-observation-question]"));
+const observationRatingButtons = Array.from(document.querySelectorAll(".observation-rating-circle"));
 const observationPrompt = document.getElementById("observationPrompt");
 const observationCancelBtn = document.getElementById("observationCancelBtn");
 const observationSaveBtn = document.getElementById("observationSaveBtn");
@@ -196,6 +213,7 @@ let groupPointSelectedFacialExpression = "";
 let groupInteractionMode = "";
 let selectedGroupActivityTypologies = [];
 let isSavingObservation = false;
+let observationModalMode = OBSERVATION_MODAL_MODE_NOTE;
 
 initialize().catch((error) => {
   console.error("Initialization failed:", error);
@@ -301,12 +319,23 @@ async function initialize() {
   if (groupPointModal) {
     groupPointModal.addEventListener("click", onGroupPointModalClick);
   }
+  if (observationMenuBtn) {
+    observationMenuBtn.addEventListener("click", onObservationMenuClick);
+  }
   if (observationCameraBtn) {
     observationCameraBtn.addEventListener("click", onObservationCameraClick);
   }
   if (observationNoteBtn) {
     observationNoteBtn.addEventListener("click", onObservationNoteClick);
   }
+  if (observationQuestionsBtn) {
+    observationQuestionsBtn.addEventListener("click", onObservationQuestionsClick);
+  }
+  observationRatingButtons.forEach((button) => {
+    button.addEventListener("click", () =>
+      setObservationQuestionResponse(button.dataset.observationRatingKey || "", button.dataset.observationRatingValue || "")
+    );
+  });
   if (observationPhotoInput) {
     observationPhotoInput.addEventListener("change", onObservationPhotoChange);
   }
@@ -350,6 +379,7 @@ async function initialize() {
       setGroupPointSelectedFacialExpression(button.dataset.groupPointFacialExpression || "")
     );
   });
+  document.addEventListener("click", onDocumentClick);
   document.addEventListener("keydown", onDocumentKeyDown);
   setMapZoom(DEFAULT_MAP_ZOOM, { preserveCenter: false });
 
@@ -1487,7 +1517,25 @@ function onGroupPointModalClick(event) {
   }
 }
 
+function onDocumentClick(event) {
+  if (!isObservationMenuOpen()) {
+    return;
+  }
+
+  const target = event.target;
+  if (target instanceof Node && observationFabStack?.contains(target)) {
+    return;
+  }
+
+  setObservationMenuOpen(false);
+}
+
 function onDocumentKeyDown(event) {
+  if (event.key === "Escape" && isObservationMenuOpen()) {
+    setObservationMenuOpen(false);
+    return;
+  }
+
   if (event.key === "Escape" && isActivityNoteModalOpen()) {
     closeActivityNoteModal();
     return;
@@ -1698,6 +1746,30 @@ function setActivityNotePrompt(message, state = "muted") {
   activityNotePrompt.dataset.state = state;
 }
 
+function onObservationMenuClick(event) {
+  event.stopPropagation();
+  if (isSavingObservation) {
+    return;
+  }
+
+  setObservationMenuOpen(!isObservationMenuOpen());
+}
+
+function isObservationMenuOpen() {
+  return !!observationFabMenu && !observationFabMenu.hidden;
+}
+
+function setObservationMenuOpen(open) {
+  if (!observationFabMenu) {
+    return;
+  }
+
+  observationFabMenu.hidden = !open;
+  if (observationMenuBtn) {
+    observationMenuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+}
+
 function onObservationModalClick(event) {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
@@ -1713,6 +1785,8 @@ function onObservationCameraClick() {
   if (!observationPhotoInput || isSavingObservation) {
     return;
   }
+
+  setObservationMenuOpen(false);
 
   if (isGroupPointModalOpen()) {
     setObservationStatus("Finish the open group member popup before saving a site observation.", "warn");
@@ -1731,29 +1805,66 @@ function onObservationNoteClick() {
     return;
   }
 
+  setObservationMenuOpen(false);
+
   if (isGroupPointModalOpen()) {
     setObservationStatus("Finish the open group member popup before saving a site observation.", "warn");
     return;
   }
 
   if (isObservationModalOpen()) {
+    if (observationModalMode !== OBSERVATION_MODAL_MODE_NOTE) {
+      openObservationModal(OBSERVATION_MODAL_MODE_NOTE);
+      return;
+    }
     observationNote?.focus();
     return;
   }
 
-  openObservationModal();
+  openObservationModal(OBSERVATION_MODAL_MODE_NOTE);
 }
 
-function openObservationModal() {
+function onObservationQuestionsClick() {
+  if (isSavingObservation) {
+    return;
+  }
+
+  setObservationMenuOpen(false);
+
+  if (isGroupPointModalOpen()) {
+    setObservationStatus("Finish the open group member popup before saving a site observation.", "warn");
+    return;
+  }
+
+  if (isObservationModalOpen()) {
+    if (observationModalMode !== OBSERVATION_MODAL_MODE_QUESTIONS) {
+      openObservationModal(OBSERVATION_MODAL_MODE_QUESTIONS);
+      return;
+    }
+    observationRatingButtons[0]?.focus();
+    return;
+  }
+
+  openObservationModal(OBSERVATION_MODAL_MODE_QUESTIONS);
+}
+
+function openObservationModal(mode = OBSERVATION_MODAL_MODE_NOTE) {
   if (!observationModal) {
     return;
   }
 
+  observationModalMode =
+    mode === OBSERVATION_MODAL_MODE_QUESTIONS ? OBSERVATION_MODAL_MODE_QUESTIONS : OBSERVATION_MODAL_MODE_NOTE;
+  syncObservationModalMode();
   updateObservationContext();
   setObservationPrompt("", "muted");
   observationModal.hidden = false;
   observationModal.setAttribute("aria-hidden", "false");
   syncModalOpenState();
+  if (observationModalMode === OBSERVATION_MODAL_MODE_QUESTIONS) {
+    observationRatingButtons[0]?.focus();
+    return;
+  }
   observationNote?.focus();
 }
 
@@ -1765,16 +1876,85 @@ function closeObservationModal({ preserveNote = false } = {}) {
   if (!preserveNote && observationNote) {
     observationNote.value = "";
   }
+  if (!preserveNote) {
+    resetObservationQuestions();
+  }
   setObservationPrompt("", "muted");
   observationModal.hidden = true;
   observationModal.setAttribute("aria-hidden", "true");
   syncModalOpenState();
 }
 
+function syncObservationModalMode() {
+  const isQuestionsMode = observationModalMode === OBSERVATION_MODAL_MODE_QUESTIONS;
+
+  if (observationModalTitle) {
+    observationModalTitle.textContent = isQuestionsMode ? "Answer Short Qs" : "Save Site Observation";
+  }
+  if (observationNoteField) {
+    observationNoteField.hidden = isQuestionsMode;
+  }
+  if (observationQuestionsField) {
+    observationQuestionsField.hidden = !isQuestionsMode;
+  }
+  if (observationSaveBtn) {
+    observationSaveBtn.textContent = isQuestionsMode ? "Save Answers" : "Save Observation";
+  }
+}
+
+function resetObservationQuestions() {
+  observationQuestionInputs.forEach((input) => {
+    input.value = "";
+  });
+  syncObservationRatingButtons();
+}
+
+function setObservationQuestionResponse(questionKey, value) {
+  const input = observationQuestionInputs.find((candidate) => candidate.dataset.observationQuestion === questionKey);
+  if (!input || !/^[1-5]$/.test(value)) {
+    return;
+  }
+
+  input.value = value;
+  syncObservationRatingButtons(questionKey);
+}
+
+function syncObservationRatingButtons(questionKey = "") {
+  observationRatingButtons.forEach((button) => {
+    const buttonQuestionKey = button.dataset.observationRatingKey || "";
+    if (questionKey && buttonQuestionKey !== questionKey) {
+      return;
+    }
+
+    const input = observationQuestionInputs.find(
+      (candidate) => candidate.dataset.observationQuestion === buttonQuestionKey
+    );
+    const isSelected = !!input && input.value === button.dataset.observationRatingValue;
+    button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+  });
+}
+
 async function onObservationFormSubmit(event) {
   event.preventDefault();
 
   if (isSavingObservation) {
+    return;
+  }
+
+  if (observationModalMode === OBSERVATION_MODAL_MODE_QUESTIONS) {
+    const shortQuestionResponses = readObservationQuestionResponses();
+    if (!shortQuestionResponses) {
+      setObservationPrompt("Answer all short Qs from 1 to 5 before saving.", "error");
+      return;
+    }
+
+    const createdObservation = await saveSiteObservation({
+      observationType: "questions",
+      shortQuestionResponses,
+    });
+    if (createdObservation) {
+      closeObservationModal();
+    }
     return;
   }
 
@@ -1793,6 +1973,21 @@ async function onObservationFormSubmit(event) {
   }
 }
 
+function readObservationQuestionResponses() {
+  const responses = {};
+
+  for (const question of OBSERVATION_QUESTIONS) {
+    const input = observationQuestionInputs.find((candidate) => candidate.dataset.observationQuestion === question.key);
+    const value = Number.parseInt(input?.value || "", 10);
+    if (!Number.isInteger(value) || value < 1 || value > 5) {
+      return null;
+    }
+    responses[question.key] = value;
+  }
+
+  return responses;
+}
+
 async function onObservationPhotoChange(event) {
   const file = event.target.files?.[0];
   event.target.value = "";
@@ -1807,17 +2002,26 @@ async function onObservationPhotoChange(event) {
   });
 }
 
-async function saveSiteObservation({ observationType, noteText = "", file = null }) {
+async function saveSiteObservation({ observationType, noteText = "", file = null, shortQuestionResponses = null }) {
   setObservationActionState(true);
   if (observationType === "note") {
     setObservationPrompt("Saving site observation...", "muted");
     setObservationStatus("Saving site observation note...", "muted");
+  } else if (observationType === "questions") {
+    setObservationPrompt("Requesting current device GPS...", "muted");
+    setObservationStatus("Requesting current device GPS for site observation answers...", "muted");
   } else {
     setObservationStatus("Preparing site observation photo...", "muted");
   }
 
   try {
     const photoData = file ? await buildPhotoCaptureState(file, setObservationStatus) : null;
+    const deviceLocation = observationType === "questions" ? await requestCurrentDeviceLocation() : null;
+    if (deviceLocation) {
+      const gpsText = `${formatCoordinate(deviceLocation.latitude)}, ${formatCoordinate(deviceLocation.longitude)}`;
+      setObservationPrompt(`Saving answers with GPS: ${gpsText}`, "muted");
+      setObservationStatus(`Saving site observation answers with GPS: ${gpsText}`, "muted");
+    }
     const response = await apiRequest(API_SITE_OBSERVATIONS, {
       method: "POST",
       body: buildRequestBodyWithOptionalPhoto(
@@ -1825,6 +2029,8 @@ async function saveSiteObservation({ observationType, noteText = "", file = null
           observationType,
           noteText,
           photoData,
+          shortQuestionResponses,
+          deviceLocation,
         }),
         file
       ),
@@ -1840,16 +2046,20 @@ async function saveSiteObservation({ observationType, noteText = "", file = null
     }
 
     const successMessage =
-      observationType === "photo" ? "Site observation photo saved." : "Site observation note saved.";
+      observationType === "photo"
+        ? "Site observation photo saved."
+        : observationType === "questions"
+          ? "Site observation answers saved."
+          : "Site observation note saved.";
     setObservationStatus(successMessage, "success");
-    if (observationType === "note") {
+    if (observationType === "note" || observationType === "questions") {
       setObservationPrompt(successMessage, "success");
     }
     return data.observation;
   } catch (error) {
     const errorMessage = `Could not save site observation: ${error.message}`;
     setObservationStatus(errorMessage, "error");
-    if (observationType === "note") {
+    if (observationType === "note" || observationType === "questions") {
       setObservationPrompt(errorMessage, "error");
     }
     alert(errorMessage);
@@ -1859,15 +2069,26 @@ async function saveSiteObservation({ observationType, noteText = "", file = null
   }
 }
 
-function buildSiteObservationPayload({ observationType, noteText = "", photoData = null }) {
+function buildSiteObservationPayload({
+  observationType,
+  noteText = "",
+  photoData = null,
+  shortQuestionResponses = null,
+  deviceLocation = null,
+}) {
   return {
     buildingId: currentBuildingId || null,
     floorId: currentFloorId || null,
     observationType,
     observationTime: new Date().toISOString(),
     note: noteText || null,
+    shortQuestionResponses: shortQuestionResponses ? { ...shortQuestionResponses } : null,
     photoName: photoData?.photoName || null,
-    photoLocation: photoData?.photoLocation ? { ...photoData.photoLocation } : null,
+    photoLocation: photoData?.photoLocation
+      ? { ...photoData.photoLocation }
+      : deviceLocation
+        ? { ...deviceLocation }
+        : null,
   };
 }
 
@@ -1891,12 +2112,24 @@ function updateObservationContext() {
 
 function setObservationActionState(busy) {
   isSavingObservation = !!busy;
+  if (busy) {
+    setObservationMenuOpen(false);
+  }
   if (observationCameraBtn) {
     observationCameraBtn.disabled = !!busy;
   }
   if (observationNoteBtn) {
     observationNoteBtn.disabled = !!busy;
   }
+  if (observationQuestionsBtn) {
+    observationQuestionsBtn.disabled = !!busy;
+  }
+  if (observationMenuBtn) {
+    observationMenuBtn.disabled = !!busy;
+  }
+  observationRatingButtons.forEach((button) => {
+    button.disabled = !!busy;
+  });
   if (observationSaveBtn) {
     observationSaveBtn.disabled = !!busy;
   }
