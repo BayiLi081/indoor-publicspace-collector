@@ -5,6 +5,7 @@ const API_BUILDINGS = "/api/buildings/";
 const API_RECORDS = "/api/records/";
 const API_RECORDS_EXPORT = "/api/records/export/";
 const API_SITE_OBSERVATIONS = "/api/site-observations/";
+const API_PERSON_QUESTIONNAIRE_RESPONSES = "/api/person-questionnaire-responses/";
 const DEFAULT_LOCATE_STATUS_MESSAGE = "Use Locate via GPS for your approximate spot, or Locate via POI to show named places.";
 const DEFAULT_OBSERVATION_STATUS_MESSAGE = "Site Observations";
 const OBSERVATION_MODAL_MODE_NOTE = "note";
@@ -14,6 +15,59 @@ const OBSERVATION_QUESTIONS = [
   { key: "greeneryLevel", label: "Greenery level" },
   { key: "noiseLevel", label: "Noise level" },
   { key: "cleanliness", label: "Cleanliness" },
+];
+const PERSON_QUESTIONNAIRE_QUESTIONS = [
+  {
+    key: "mainPurpose",
+    question: "What is your main purpose for being here today?",
+    choices: [
+      { value: "errand_transit", label: "Errand / transit (necessary)" },
+      { value: "relaxing_passing_time", label: "Relaxing / passing time (optional)" },
+      { value: "meeting_people_social", label: "Meeting people / social activity" },
+    ],
+  },
+  {
+    key: "visitFrequency",
+    question: "How often do you visit this place?",
+    choices: [
+      { value: "daily", label: "Daily" },
+      { value: "1_4_times_per_week", label: "1-4 times per week" },
+      { value: "1_3_times_per_month", label: "1-3 times per month" },
+      { value: "first_time", label: "First time" },
+    ],
+  },
+  {
+    key: "stayDuration",
+    question: "How long do you usually stay here per visit?",
+    choices: [
+      { value: "under_5_minutes", label: "<5 minutes" },
+      { value: "5_20_minutes", label: "5-20 minutes" },
+      { value: "20_60_minutes", label: "20-60 minutes" },
+      { value: "over_60_minutes", label: ">60 minutes" },
+    ],
+  },
+  {
+    key: "overallRating",
+    question: "Overall, how would you rate this space?",
+    choices: [
+      { value: "1", label: "1 Very poor" },
+      { value: "2", label: "2 Poor" },
+      { value: "3", label: "3 okay" },
+      { value: "4", label: "4 Good" },
+      { value: "5", label: "5 Very good" },
+    ],
+  },
+  {
+    key: "socialInteraction",
+    question: "Do you feel this is a place where you can meet or interact with people?",
+    choices: [
+      { value: "not_at_all", label: "Not at all" },
+      { value: "slightly", label: "Slightly" },
+      { value: "moderately", label: "Moderately" },
+      { value: "yes", label: "Yes" },
+      { value: "definitely", label: "Definitely" },
+    ],
+  },
 ];
 
 const ROOT_BUILDING_ID = "__root__";
@@ -100,6 +154,8 @@ const activityTypeButtons = Array.from(document.querySelectorAll(".toggle-btn[da
 const activityTypeControls = document.getElementById("activityTypeControls");
 const activityTypeHint = document.getElementById("activityTypeHint");
 const genderButtons = Array.from(document.querySelectorAll(".toggle-btn[data-gender]"));
+const ethnicGroup = document.getElementById("ethnicGroup");
+const ethnicGroupButtons = Array.from(document.querySelectorAll(".toggle-btn[data-ethnic-group]"));
 const ageGroupButtons = Array.from(document.querySelectorAll(".toggle-btn[data-age-group]"));
 const facialExpressionButtons = Array.from(document.querySelectorAll(".toggle-btn[data-facial-expression]"));
 const indivGrpButtons = Array.from(document.querySelectorAll(".indivgrp-btn[data-indivgrp-type]"));
@@ -143,6 +199,7 @@ const observationFabMenu = document.getElementById("observationFabMenu");
 const observationCameraBtn = document.getElementById("observationCameraBtn");
 const observationNoteBtn = document.getElementById("observationNoteBtn");
 const observationQuestionsBtn = document.getElementById("observationQuestionsBtn");
+const personQuestionnaireBtn = document.getElementById("personQuestionnaireBtn");
 const observationStatus = document.getElementById("observationStatus");
 const observationPhotoInput = document.getElementById("observationPhotoInput");
 const observationModal = document.getElementById("observationModal");
@@ -157,6 +214,23 @@ const observationRatingButtons = Array.from(document.querySelectorAll(".observat
 const observationPrompt = document.getElementById("observationPrompt");
 const observationCancelBtn = document.getElementById("observationCancelBtn");
 const observationSaveBtn = document.getElementById("observationSaveBtn");
+const personQuestionnaireSelectModal = document.getElementById("personQuestionnaireSelectModal");
+const personQuestionnaireSelectForm = document.getElementById("personQuestionnaireSelectForm");
+const personQuestionnaireSelectTitle = document.getElementById("personQuestionnaireSelectTitle");
+const personQuestionnaireSelectSubtitle = document.getElementById("personQuestionnaireSelectSubtitle");
+const personQuestionnaireSelectBody = document.getElementById("personQuestionnaireSelectBody");
+const personQuestionnaireSelectPrompt = document.getElementById("personQuestionnaireSelectPrompt");
+const personQuestionnaireSelectBackBtn = document.getElementById("personQuestionnaireSelectBackBtn");
+const personQuestionnaireSelectNextBtn = document.getElementById("personQuestionnaireSelectNextBtn");
+const personQuestionnaireModal = document.getElementById("personQuestionnaireModal");
+const personQuestionnaireForm = document.getElementById("personQuestionnaireForm");
+const personQuestionnaireSubtitle = document.getElementById("personQuestionnaireSubtitle");
+const personQuestionnaireProgress = document.getElementById("personQuestionnaireProgress");
+const personQuestionnaireQuestionText = document.getElementById("personQuestionnaireQuestionText");
+const personQuestionnaireOptions = document.getElementById("personQuestionnaireOptions");
+const personQuestionnairePrompt = document.getElementById("personQuestionnairePrompt");
+const personQuestionnairePrevBtn = document.getElementById("personQuestionnairePrevBtn");
+const personQuestionnaireNextBtn = document.getElementById("personQuestionnaireNextBtn");
 const activityNoteModal = document.getElementById("activityNoteModal");
 const activityNoteForm = document.getElementById("activityNoteForm");
 const activityNoteText = document.getElementById("activityNoteText");
@@ -179,6 +253,7 @@ let draftGroupPoint = null;
 let selectedActivityCategory = "";
 let selectedActivityTypes = [];
 let selectedGender = "";
+let selectedEthnicGroup = "";
 let selectedFacialExpression = "";
 let selectedPhotoFile = null;
 let selectedPhotoLocation = null;
@@ -215,6 +290,13 @@ let groupInteractionMode = "";
 let selectedGroupActivityTypologies = [];
 let isSavingObservation = false;
 let observationModalMode = OBSERVATION_MODAL_MODE_NOTE;
+let latestSavedRecordIds = [];
+let questionnaireSelectionCandidates = [];
+let questionnaireSelectedRecordIds = [];
+let questionnaireSelectionStep = "select";
+let questionnaireQuestionIndex = 0;
+let questionnaireResponses = {};
+let isSavingPersonQuestionnaire = false;
 
 initialize().catch((error) => {
   console.error("Initialization failed:", error);
@@ -283,6 +365,9 @@ async function initialize() {
   genderButtons.forEach((button) => {
     button.addEventListener("click", () => setSelectedGender(button.dataset.gender || ""));
   });
+  ethnicGroupButtons.forEach((button) => {
+    button.addEventListener("click", () => setSelectedEthnicGroup(button.dataset.ethnicGroup || ""));
+  });
   ageGroupButtons.forEach((button) => {
     button.addEventListener("click", () => setSelectedAgeGroup(button.dataset.ageGroup || ""));
   });
@@ -332,6 +417,9 @@ async function initialize() {
   if (observationQuestionsBtn) {
     observationQuestionsBtn.addEventListener("click", onObservationQuestionsClick);
   }
+  if (personQuestionnaireBtn) {
+    personQuestionnaireBtn.addEventListener("click", onPersonQuestionnaireClick);
+  }
   observationRatingButtons.forEach((button) => {
     button.addEventListener("click", () =>
       setObservationQuestionResponse(button.dataset.observationRatingKey || "", button.dataset.observationRatingValue || "")
@@ -348,6 +436,24 @@ async function initialize() {
   }
   if (observationModal) {
     observationModal.addEventListener("click", onObservationModalClick);
+  }
+  if (personQuestionnaireSelectForm) {
+    personQuestionnaireSelectForm.addEventListener("submit", onPersonQuestionnaireSelectSubmit);
+  }
+  if (personQuestionnaireSelectBackBtn) {
+    personQuestionnaireSelectBackBtn.addEventListener("click", onPersonQuestionnaireSelectBack);
+  }
+  if (personQuestionnaireSelectModal) {
+    personQuestionnaireSelectModal.addEventListener("click", onPersonQuestionnaireSelectModalClick);
+  }
+  if (personQuestionnaireForm) {
+    personQuestionnaireForm.addEventListener("submit", onPersonQuestionnaireFormSubmit);
+  }
+  if (personQuestionnairePrevBtn) {
+    personQuestionnairePrevBtn.addEventListener("click", onPersonQuestionnairePrevious);
+  }
+  if (personQuestionnaireModal) {
+    personQuestionnaireModal.addEventListener("click", onPersonQuestionnaireModalClick);
   }
   if (activityNoteForm) {
     activityNoteForm.addEventListener("submit", onActivityNoteFormSubmit);
@@ -388,6 +494,7 @@ async function initialize() {
   setSelectedActivityCategory("");
   setSelectedActivityTypes([]);
   setSelectedGender("");
+  setSelectedEthnicGroup("");
   setSelectedAgeGroup("");
   setSelectedFacialExpression("");
   setRecordMode("");
@@ -828,6 +935,18 @@ function setSelectedGender(value) {
   });
 }
 
+function setSelectedEthnicGroup(value) {
+  selectedEthnicGroup = normalizeEthnicGroup(value) || "";
+  if (ethnicGroup) {
+    ethnicGroup.value = selectedEthnicGroup;
+  }
+  ethnicGroupButtons.forEach((button) => {
+    const isActive = normalizeEthnicGroup(button.dataset.ethnicGroup || "") === selectedEthnicGroup;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
 function setSelectedAgeGroup(value) {
   const selectedButton = ageGroupButtons.find((button) => button.dataset.ageGroup === value) || null;
   const nextAgeGroup = selectedButton ? selectedButton.dataset.ageLabel || selectedButton.textContent.trim() : "";
@@ -926,6 +1045,14 @@ function isGroupPointModalOpen() {
 
 function isObservationModalOpen() {
   return !!observationModal && !observationModal.hidden;
+}
+
+function isPersonQuestionnaireSelectModalOpen() {
+  return !!personQuestionnaireSelectModal && !personQuestionnaireSelectModal.hidden;
+}
+
+function isPersonQuestionnaireModalOpen() {
+  return !!personQuestionnaireModal && !personQuestionnaireModal.hidden;
 }
 
 function isActivityNoteModalOpen() {
@@ -1079,7 +1206,11 @@ function closeGroupPointModal({ discardDraft = false, keepStatus = false } = {})
 function syncModalOpenState() {
   document.body.classList.toggle(
     "modal-open",
-    isGroupPointModalOpen() || isObservationModalOpen() || isActivityNoteModalOpen()
+    isGroupPointModalOpen() ||
+      isObservationModalOpen() ||
+      isPersonQuestionnaireSelectModalOpen() ||
+      isPersonQuestionnaireModalOpen() ||
+      isActivityNoteModalOpen()
   );
 }
 
@@ -1546,6 +1677,16 @@ function onDocumentKeyDown(event) {
 
   if (event.key === "Escape" && isObservationModalOpen()) {
     closeObservationModal();
+    return;
+  }
+
+  if (event.key === "Escape" && isPersonQuestionnaireSelectModalOpen()) {
+    closePersonQuestionnaireSelectModal();
+    return;
+  }
+
+  if (event.key === "Escape" && isPersonQuestionnaireModalOpen()) {
+    closePersonQuestionnaireModal({ requireConfirm: true });
     return;
   }
 
@@ -2130,6 +2271,9 @@ function setObservationActionState(busy) {
   if (observationMenuBtn) {
     observationMenuBtn.disabled = !!busy;
   }
+  if (personQuestionnaireBtn) {
+    personQuestionnaireBtn.disabled = !!busy || isSavingPersonQuestionnaire;
+  }
   observationRatingButtons.forEach((button) => {
     button.disabled = !!busy;
   });
@@ -2142,6 +2286,566 @@ function setObservationActionState(busy) {
   if (observationPhotoInput) {
     observationPhotoInput.disabled = !!busy;
   }
+}
+
+function onPersonQuestionnaireClick() {
+  if (isSavingPersonQuestionnaire) {
+    return;
+  }
+
+  setObservationMenuOpen(false);
+
+  if (isGroupPointModalOpen()) {
+    setObservationStatus("Finish the open group member popup before starting a person questionnaire.", "warn");
+    return;
+  }
+
+  if (isObservationModalOpen()) {
+    closeObservationModal({ preserveNote: true });
+  }
+
+  const candidates = getRecentQuestionnaireCandidates();
+  if (!candidates.length) {
+    const message = "No recently saved activity people are available. Save an individual or group record first.";
+    setObservationStatus(message, "warn");
+    alert(message);
+    return;
+  }
+
+  openPersonQuestionnaireSelectModal(candidates);
+}
+
+function getRecentQuestionnaireCandidates() {
+  const recordsById = new Map(records.map((record) => [record.id, record]));
+  const latestSavedRecords = latestSavedRecordIds
+    .map((recordId) => recordsById.get(recordId))
+    .filter((record) => record && record.id);
+
+  if (latestSavedRecords.length) {
+    return sortQuestionnaireCandidateRecords(latestSavedRecords);
+  }
+
+  const scopedRecords =
+    currentBuildingId && currentFloorId
+      ? records.filter((record) => {
+          const recordBuildingId = getRecordBuildingId(record);
+          const recordFloorId = getRecordFloorId(record, recordBuildingId);
+          return recordBuildingId === currentBuildingId && recordFloorId === currentFloorId;
+        })
+      : [...records];
+  const candidatePool = scopedRecords.length ? scopedRecords : [...records];
+  if (!candidatePool.length) {
+    return [];
+  }
+
+  const latestRecord = candidatePool
+    .slice()
+    .sort((left, right) => getRecordRecencyMillis(right) - getRecordRecencyMillis(left))[0];
+  const latestCluster = parseAutoActorId(latestRecord?.actorId);
+
+  if (latestCluster) {
+    const groupRecords = candidatePool.filter((record) => {
+      const parsedActor = parseAutoActorId(record.actorId);
+      return !!parsedActor && parsedActor.clusterNumber === latestCluster.clusterNumber;
+    });
+    if (groupRecords.length > 1) {
+      return sortQuestionnaireCandidateRecords(groupRecords);
+    }
+  }
+
+  return latestRecord ? [latestRecord] : [];
+}
+
+function sortQuestionnaireCandidateRecords(values) {
+  const recordsToSort = values.filter((record) => record && record.id);
+  const parsedActors = recordsToSort.map((record) => parseAutoActorId(record.actorId));
+  const clusterNumbers = parsedActors
+    .filter((parsedActor) => parsedActor !== null)
+    .map((parsedActor) => parsedActor.clusterNumber);
+  const hasSingleCluster = clusterNumbers.length === recordsToSort.length && new Set(clusterNumbers).size === 1;
+
+  return recordsToSort.slice().sort((left, right) => {
+    if (hasSingleCluster) {
+      const leftActor = parseAutoActorId(left.actorId);
+      const rightActor = parseAutoActorId(right.actorId);
+      if (leftActor && rightActor && leftActor.personNumber !== rightActor.personNumber) {
+        return leftActor.personNumber - rightActor.personNumber;
+      }
+    }
+    return getRecordRecencyMillis(right) - getRecordRecencyMillis(left);
+  });
+}
+
+function getRecordRecencyMillis(record) {
+  const createdAt = Date.parse(record?.createdAt || "");
+  if (Number.isFinite(createdAt)) {
+    return createdAt;
+  }
+
+  const activityTime = Date.parse(record?.activityTime || "");
+  return Number.isFinite(activityTime) ? activityTime : 0;
+}
+
+function openPersonQuestionnaireSelectModal(candidates) {
+  if (!personQuestionnaireSelectModal || !personQuestionnaireSelectForm) {
+    return;
+  }
+
+  questionnaireSelectionCandidates = sortQuestionnaireCandidateRecords(candidates);
+  questionnaireSelectedRecordIds = questionnaireSelectionCandidates[0]?.id ? [questionnaireSelectionCandidates[0].id] : [];
+  questionnaireSelectionStep = "select";
+  setPersonQuestionnaireSelectPrompt("", "muted");
+  renderPersonQuestionnaireSelection();
+  personQuestionnaireSelectModal.hidden = false;
+  personQuestionnaireSelectModal.setAttribute("aria-hidden", "false");
+  syncModalOpenState();
+  personQuestionnaireSelectBody?.querySelector("[data-questionnaire-record-id]")?.focus();
+}
+
+function closePersonQuestionnaireSelectModal() {
+  if (!personQuestionnaireSelectModal) {
+    return;
+  }
+
+  personQuestionnaireSelectModal.hidden = true;
+  personQuestionnaireSelectModal.setAttribute("aria-hidden", "true");
+  questionnaireSelectionCandidates = [];
+  questionnaireSelectedRecordIds = [];
+  questionnaireSelectionStep = "select";
+  setPersonQuestionnaireSelectPrompt("", "muted");
+  syncModalOpenState();
+}
+
+function renderPersonQuestionnaireSelection() {
+  if (!personQuestionnaireSelectBody) {
+    return;
+  }
+
+  const isConfirmStep = questionnaireSelectionStep === "confirm";
+  const selectedRecords = getSelectedQuestionnaireCandidateRecords();
+  const isGroupCandidate = questionnaireSelectionCandidates.length > 1;
+  if (personQuestionnaireSelectTitle) {
+    personQuestionnaireSelectTitle.textContent = isConfirmStep ? "Confirm People" : "Choose People";
+  }
+  if (personQuestionnaireSelectSubtitle) {
+    personQuestionnaireSelectSubtitle.textContent = isConfirmStep
+      ? "Confirm the people before starting the questionnaire."
+      : isGroupCandidate
+        ? "Most recent upload is a group capture. Choose one member."
+        : "Most recent upload is an individual capture.";
+  }
+  if (personQuestionnaireSelectBackBtn) {
+    personQuestionnaireSelectBackBtn.textContent = isConfirmStep ? "Back" : "Cancel";
+  }
+  if (personQuestionnaireSelectNextBtn) {
+    personQuestionnaireSelectNextBtn.textContent = isConfirmStep ? "Confirm People" : "Continue";
+  }
+
+  if (isConfirmStep) {
+    personQuestionnaireSelectBody.innerHTML = `
+      <div class="person-questionnaire-confirm-summary">
+        <strong>${selectedRecords.length} selected</strong>
+        <p>The five-question response will be linked to this person ID.</p>
+      </div>
+      <div class="person-questionnaire-candidate-list">
+        ${selectedRecords.map((record) => renderPersonQuestionnaireCandidate(record, { readOnly: true })).join("")}
+      </div>
+    `;
+    return;
+  }
+
+  personQuestionnaireSelectBody.innerHTML = `
+    <div class="person-questionnaire-candidate-list">
+      ${questionnaireSelectionCandidates
+        .map((record) =>
+          renderPersonQuestionnaireCandidate(record, {
+            checked: questionnaireSelectedRecordIds.includes(record.id),
+          })
+        )
+        .join("")}
+    </div>
+  `;
+
+  personQuestionnaireSelectBody.querySelectorAll("[data-questionnaire-record-id]").forEach((input) => {
+    input.addEventListener("change", onPersonQuestionnaireCandidateChange);
+  });
+}
+
+function renderPersonQuestionnaireCandidate(record, options = {}) {
+  const readOnly = options.readOnly === true;
+  const checked = options.checked !== false;
+  const label = getPersonQuestionnaireCandidateLabel(record);
+  const details = getPersonQuestionnaireCandidateDetails(record);
+
+  if (readOnly) {
+    return `
+      <article class="person-questionnaire-person-option is-readonly">
+        <div>
+          <strong>${escapeHtml(label)}</strong>
+          <span>${escapeHtml(details)}</span>
+        </div>
+      </article>
+    `;
+  }
+
+  return `
+    <label class="person-questionnaire-person-option">
+      <input type="radio" name="personQuestionnaireRecordId" data-questionnaire-record-id="${escapeHtml(record.id)}" ${checked ? "checked" : ""}>
+      <span>
+        <strong>${escapeHtml(label)}</strong>
+        <span>${escapeHtml(details)}</span>
+      </span>
+    </label>
+  `;
+}
+
+function getPersonQuestionnaireCandidateLabel(record) {
+  const parsedActor = parseAutoActorId(record?.actorId);
+  if (parsedActor && questionnaireSelectionCandidates.length > 1) {
+    return `Member ${parsedActor.personNumber} | ${record.actorId}`;
+  }
+  return record?.actorId || "Person";
+}
+
+function getPersonQuestionnaireCandidateDetails(record) {
+  const recordBuildingId = getRecordBuildingId(record);
+  const recordFloorId = getRecordFloorId(record, recordBuildingId);
+  return [
+    formatActivityType(record?.activityType),
+    formatGender(record?.gender),
+    formatAgeGroup(record?.ageGroup),
+    getBuildingLabel(recordBuildingId),
+    getFloorLabel(recordBuildingId, recordFloorId),
+    formatDate(record?.activityTime),
+  ]
+    .filter((value) => value && value !== "-")
+    .join(" | ");
+}
+
+function onPersonQuestionnaireCandidateChange() {
+  if (!personQuestionnaireSelectBody) {
+    return;
+  }
+
+  const selectedInput = personQuestionnaireSelectBody.querySelector("[data-questionnaire-record-id]:checked");
+  questionnaireSelectedRecordIds = selectedInput?.dataset.questionnaireRecordId
+    ? [selectedInput.dataset.questionnaireRecordId]
+    : [];
+  setPersonQuestionnaireSelectPrompt("", "muted");
+}
+
+function getSelectedQuestionnaireCandidateRecords() {
+  const selectedIds = new Set(questionnaireSelectedRecordIds);
+  return questionnaireSelectionCandidates.filter((record) => selectedIds.has(record.id));
+}
+
+function onPersonQuestionnaireSelectSubmit(event) {
+  event.preventDefault();
+
+  if (questionnaireSelectionStep !== "confirm") {
+    onPersonQuestionnaireCandidateChange();
+    if (!questionnaireSelectedRecordIds.length) {
+      setPersonQuestionnaireSelectPrompt("Choose at least one person.", "error");
+      return;
+    }
+    questionnaireSelectionStep = "confirm";
+    renderPersonQuestionnaireSelection();
+    setPersonQuestionnaireSelectPrompt("", "muted");
+    personQuestionnaireSelectNextBtn?.focus();
+    return;
+  }
+
+  const selectedRecords = getSelectedQuestionnaireCandidateRecords();
+  if (!selectedRecords.length) {
+    questionnaireSelectionStep = "select";
+    renderPersonQuestionnaireSelection();
+    setPersonQuestionnaireSelectPrompt("Choose at least one person.", "error");
+    return;
+  }
+
+  const selectedRecordIds = selectedRecords.slice(0, 1).map((record) => record.id);
+  closePersonQuestionnaireSelectModal();
+  openPersonQuestionnaireModal(selectedRecordIds);
+}
+
+function onPersonQuestionnaireSelectBack() {
+  if (questionnaireSelectionStep === "confirm") {
+    questionnaireSelectionStep = "select";
+    renderPersonQuestionnaireSelection();
+    setPersonQuestionnaireSelectPrompt("", "muted");
+    return;
+  }
+
+  closePersonQuestionnaireSelectModal();
+}
+
+function onPersonQuestionnaireSelectModalClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (target.hasAttribute("data-person-questionnaire-select-close")) {
+    closePersonQuestionnaireSelectModal();
+  }
+}
+
+function openPersonQuestionnaireModal(recordIds) {
+  if (!personQuestionnaireModal || !personQuestionnaireForm) {
+    return;
+  }
+
+  questionnaireSelectedRecordIds = [...recordIds];
+  questionnaireQuestionIndex = 0;
+  questionnaireResponses = {};
+  setPersonQuestionnairePrompt("", "muted");
+  renderPersonQuestionnaireQuestion();
+  personQuestionnaireModal.hidden = false;
+  personQuestionnaireModal.setAttribute("aria-hidden", "false");
+  syncModalOpenState();
+  personQuestionnaireOptions?.querySelector("button")?.focus();
+}
+
+function closePersonQuestionnaireModal({ requireConfirm = false } = {}) {
+  if (!personQuestionnaireModal) {
+    return;
+  }
+
+  const hasResponses = Object.values(questionnaireResponses).some((value) => value !== undefined && value !== "");
+  if (requireConfirm && hasResponses && !window.confirm("Discard this questionnaire response?")) {
+    return;
+  }
+
+  personQuestionnaireModal.hidden = true;
+  personQuestionnaireModal.setAttribute("aria-hidden", "true");
+  questionnaireQuestionIndex = 0;
+  questionnaireResponses = {};
+  setPersonQuestionnairePrompt("", "muted");
+  syncModalOpenState();
+}
+
+function renderPersonQuestionnaireQuestion() {
+  if (!personQuestionnaireQuestionText || !personQuestionnaireOptions) {
+    return;
+  }
+
+  const question = PERSON_QUESTIONNAIRE_QUESTIONS[questionnaireQuestionIndex];
+  if (!question) {
+    return;
+  }
+
+  const selectedRecords = records.filter((record) => questionnaireSelectedRecordIds.includes(record.id));
+  if (personQuestionnaireSubtitle) {
+    personQuestionnaireSubtitle.textContent = formatSelectedQuestionnairePeople(selectedRecords);
+  }
+  if (personQuestionnaireProgress) {
+    personQuestionnaireProgress.textContent = `Question ${questionnaireQuestionIndex + 1} of ${PERSON_QUESTIONNAIRE_QUESTIONS.length}`;
+  }
+  personQuestionnaireQuestionText.textContent = question.question;
+  personQuestionnaireOptions.innerHTML = question.choices
+    .map((choice) => {
+      const isSelected = String(questionnaireResponses[question.key] || "") === choice.value;
+      return `
+        <button type="button" class="person-questionnaire-option" data-person-questionnaire-value="${escapeHtml(choice.value)}" aria-pressed="${isSelected ? "true" : "false"}">
+          <span class="person-questionnaire-box" aria-hidden="true"></span>
+          <span>${escapeHtml(choice.label)}</span>
+        </button>
+      `;
+    })
+    .join("");
+
+  personQuestionnaireOptions.querySelectorAll("[data-person-questionnaire-value]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setPersonQuestionnaireResponse(question.key, button.dataset.personQuestionnaireValue || "");
+    });
+  });
+
+  if (personQuestionnairePrevBtn) {
+    personQuestionnairePrevBtn.disabled = questionnaireQuestionIndex === 0 || isSavingPersonQuestionnaire;
+  }
+  if (personQuestionnaireNextBtn) {
+    const isLastQuestion = questionnaireQuestionIndex === PERSON_QUESTIONNAIRE_QUESTIONS.length - 1;
+    personQuestionnaireNextBtn.textContent = isLastQuestion ? "Submit ->" : "->";
+    personQuestionnaireNextBtn.disabled = isSavingPersonQuestionnaire;
+  }
+}
+
+function formatSelectedQuestionnairePeople(selectedRecords) {
+  const count = selectedRecords.length || questionnaireSelectedRecordIds.length;
+  const actorLabels = selectedRecords
+    .map((record) => record.actorId || "Person")
+    .slice(0, 3);
+  return `${count} selected: ${actorLabels.join(", ")}`;
+}
+
+function setPersonQuestionnaireResponse(questionKey, value) {
+  const question = PERSON_QUESTIONNAIRE_QUESTIONS.find((candidate) => candidate.key === questionKey);
+  if (!question || !question.choices.some((choice) => choice.value === value)) {
+    return;
+  }
+
+  questionnaireResponses[questionKey] = value;
+  setPersonQuestionnairePrompt("", "muted");
+  syncPersonQuestionnaireOptionButtons(questionKey);
+}
+
+function syncPersonQuestionnaireOptionButtons(questionKey) {
+  const selectedValue = String(questionnaireResponses[questionKey] || "");
+  personQuestionnaireOptions?.querySelectorAll("[data-person-questionnaire-value]").forEach((button) => {
+    const isSelected = button.dataset.personQuestionnaireValue === selectedValue;
+    button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+  });
+}
+
+function onPersonQuestionnairePrevious() {
+  if (isSavingPersonQuestionnaire || questionnaireQuestionIndex <= 0) {
+    return;
+  }
+
+  questionnaireQuestionIndex -= 1;
+  renderPersonQuestionnaireQuestion();
+  setPersonQuestionnairePrompt("", "muted");
+}
+
+function onPersonQuestionnaireModalClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (target.hasAttribute("data-person-questionnaire-close")) {
+    closePersonQuestionnaireModal({ requireConfirm: true });
+  }
+}
+
+async function onPersonQuestionnaireFormSubmit(event) {
+  event.preventDefault();
+
+  if (isSavingPersonQuestionnaire) {
+    return;
+  }
+
+  const question = PERSON_QUESTIONNAIRE_QUESTIONS[questionnaireQuestionIndex];
+  if (!questionnaireResponses[question.key]) {
+    setPersonQuestionnairePrompt("Choose one answer before continuing.", "error");
+    return;
+  }
+
+  if (questionnaireQuestionIndex < PERSON_QUESTIONNAIRE_QUESTIONS.length - 1) {
+    questionnaireQuestionIndex += 1;
+    renderPersonQuestionnaireQuestion();
+    setPersonQuestionnairePrompt("", "muted");
+    personQuestionnaireOptions?.querySelector("button")?.focus();
+    return;
+  }
+
+  await savePersonQuestionnaireResponses();
+}
+
+async function savePersonQuestionnaireResponses() {
+  const missingQuestion = PERSON_QUESTIONNAIRE_QUESTIONS.find((question) => !questionnaireResponses[question.key]);
+  if (missingQuestion) {
+    setPersonQuestionnairePrompt("Answer all five questions before submitting.", "error");
+    return;
+  }
+
+  const selectedRecordIds = questionnaireSelectedRecordIds.filter(Boolean).slice(0, 1);
+  if (!selectedRecordIds.length) {
+    setPersonQuestionnairePrompt("No selected people are available.", "error");
+    return;
+  }
+
+  setPersonQuestionnaireActionState(true);
+  setPersonQuestionnairePrompt("Saving questionnaire responses...", "muted");
+  setObservationStatus("Saving person questionnaire responses...", "muted");
+
+  try {
+    const responsePayload = {
+      ...questionnaireResponses,
+      overallRating: Number.parseInt(questionnaireResponses.overallRating, 10),
+    };
+    const response = await apiRequest(API_PERSON_QUESTIONNAIRE_RESPONSES, {
+      method: "POST",
+      body: {
+        recordIds: selectedRecordIds,
+        questionnaireTime: new Date().toISOString(),
+        responses: responsePayload,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(await parseApiError(response));
+    }
+
+    const data = await response.json();
+    const savedCount = Array.isArray(data.responses) ? data.responses.length : selectedRecordIds.length;
+    const successMessage = `Questionnaire saved for ${savedCount} ${savedCount === 1 ? "person" : "people"}.`;
+    setPersonQuestionnairePrompt(successMessage, "success");
+    setObservationStatus(successMessage, "success");
+    closePersonQuestionnaireModal();
+  } catch (error) {
+    const errorMessage = `Could not save questionnaire: ${error.message}`;
+    setPersonQuestionnairePrompt(errorMessage, "error");
+    setObservationStatus(errorMessage, "error");
+    alert(errorMessage);
+  } finally {
+    setPersonQuestionnaireActionState(false);
+  }
+}
+
+function setPersonQuestionnaireActionState(busy) {
+  isSavingPersonQuestionnaire = !!busy;
+  if (busy) {
+    setObservationMenuOpen(false);
+  }
+  if (observationCameraBtn) {
+    observationCameraBtn.disabled = !!busy || isSavingObservation;
+  }
+  if (observationNoteBtn) {
+    observationNoteBtn.disabled = !!busy || isSavingObservation;
+  }
+  if (observationQuestionsBtn) {
+    observationQuestionsBtn.disabled = !!busy || isSavingObservation;
+  }
+  if (observationMenuBtn) {
+    observationMenuBtn.disabled = !!busy || isSavingObservation;
+  }
+  if (personQuestionnaireBtn) {
+    personQuestionnaireBtn.disabled = !!busy || isSavingObservation;
+  }
+  if (personQuestionnaireSelectNextBtn) {
+    personQuestionnaireSelectNextBtn.disabled = !!busy;
+  }
+  if (personQuestionnaireSelectBackBtn) {
+    personQuestionnaireSelectBackBtn.disabled = !!busy;
+  }
+  if (personQuestionnairePrevBtn) {
+    personQuestionnairePrevBtn.disabled = !!busy || questionnaireQuestionIndex === 0;
+  }
+  if (personQuestionnaireNextBtn) {
+    personQuestionnaireNextBtn.disabled = !!busy;
+  }
+  personQuestionnaireOptions?.querySelectorAll("button").forEach((button) => {
+    button.disabled = !!busy;
+  });
+}
+
+function setPersonQuestionnaireSelectPrompt(message, state = "muted") {
+  if (!personQuestionnaireSelectPrompt) {
+    return;
+  }
+
+  personQuestionnaireSelectPrompt.textContent = message;
+  personQuestionnaireSelectPrompt.dataset.state = state;
+}
+
+function setPersonQuestionnairePrompt(message, state = "muted") {
+  if (!personQuestionnairePrompt) {
+    return;
+  }
+
+  personQuestionnairePrompt.textContent = message;
+  personQuestionnairePrompt.dataset.state = state;
 }
 
 async function buildPhotoCaptureState(file, setStatus) {
@@ -2421,6 +3125,11 @@ async function onFormSubmit(event) {
       return;
     }
 
+    if (!selectedEthnicGroup) {
+      alert("Please select an ethnic group.");
+      return;
+    }
+
     if (!selectedActivityTypes.length) {
       alert("Please select at least one activity type.");
       return;
@@ -2502,6 +3211,7 @@ async function onFormSubmit(event) {
       }
 
       records.push(...createdRecords);
+      latestSavedRecordIds = createdRecords.map((record) => record.id).filter(Boolean);
       setSavePrompt(`Saved ${createdRecords.length} group records successfully.`, "success");
       finishCollection(`Group saved with ${createdRecords.length} records. Select Individual or Group for the next capture.`);
     } else {
@@ -2524,6 +3234,7 @@ async function onFormSubmit(event) {
       }
 
       records.push(createdRecord);
+      latestSavedRecordIds = createdRecord.id ? [createdRecord.id] : [];
       setSavePrompt(`Saved ${autoActorId} successfully.`, "success");
       finishCollection("Individual record saved. Select Individual or Group for the next capture.");
     }
@@ -2539,6 +3250,7 @@ function buildRecordPayload(point, actorIdValue, fallbackActivityTime, overrides
   const safeActivityTime = point?.timestampIso || fallbackActivityTime;
   const nextActivityTypes = normalizeActivityTypeSelection(overrides.activityTypes ?? selectedActivityTypes);
   const nextGender = overrides.gender ?? selectedGender;
+  const nextEthnicGroup = normalizeEthnicGroup(overrides.ethnicGroup ?? selectedEthnicGroup) || "";
   const nextAgeGroup = typeof overrides.ageGroup === "string" ? overrides.ageGroup.trim() : ageGroup.value.trim();
   const nextFacialExpression = normalizeFacialExpression(overrides.facialExpression ?? selectedFacialExpression) || "";
   return {
@@ -2547,6 +3259,7 @@ function buildRecordPayload(point, actorIdValue, fallbackActivityTime, overrides
     activityType: nextActivityTypes.join(", "),
     actorId: actorIdValue,
     gender: nextGender,
+    ethnicGroup: nextEthnicGroup,
     ageGroup: nextAgeGroup,
     facialExpression: nextFacialExpression,
     activityTime: safeActivityTime,
@@ -2612,6 +3325,7 @@ function resetForm(resetDateTime = true, advanceActorId = false) {
   setSelectedActivityCategory("");
   setSelectedActivityTypes([]);
   setSelectedGender("");
+  setSelectedEthnicGroup("");
   setSelectedAgeGroup("");
   setSelectedFacialExpression("");
   setGroupInteractionMode("", { resetPoints: false, keepStatus: true });
@@ -2662,6 +3376,7 @@ async function deleteRecord(id) {
     }
 
     records = records.filter((record) => record.id !== id);
+    latestSavedRecordIds = latestSavedRecordIds.filter((recordId) => recordId !== id);
     renderMarkers();
     renderRecords();
   } catch (error) {
@@ -2946,6 +3661,7 @@ function renderRecords() {
         formatActivityType(record.activityType),
         record.actorId,
         formatGender(record.gender),
+        formatEthnicGroup(record.ethnicGroup),
         formatAgeGroup(record.ageGroup),
         formatFacialExpression(record.facialExpression),
         record.notes,
@@ -2965,7 +3681,7 @@ function renderRecords() {
 
   if (filtered.length === 0) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="13">No records yet for this building and floor.</td>`;
+    tr.innerHTML = `<td colspan="14">No records yet for this building and floor.</td>`;
     recordsTbody.appendChild(tr);
     return;
   }
@@ -2980,6 +3696,7 @@ function renderRecords() {
       <td>${escapeHtml(formatActivityType(record.activityType))}</td>
       <td>${escapeHtml(record.actorId || "-")}</td>
       <td>${escapeHtml(formatGender(record.gender))}</td>
+      <td>${escapeHtml(formatEthnicGroup(record.ethnicGroup))}</td>
       <td>${escapeHtml(formatAgeGroup(record.ageGroup))}</td>
       <td>${escapeHtml(formatFacialExpression(record.facialExpression))}</td>
       <td>${escapeHtml(getBuildingLabel(recordBuildingId))}</td>
@@ -3020,6 +3737,7 @@ function normalizeRecord(record) {
     floorId: typeof record.floorId === "string" && record.floorId.trim() ? record.floorId : null,
     activityType: normalizeActivityTypeValue(record.activityType),
     gender: normalizeGender(record.gender),
+    ethnicGroup: normalizeEthnicGroup(record.ethnicGroup),
     ageGroup: normalizeAgeGroup(record.ageGroup),
     facialExpression: normalizeFacialExpression(record.facialExpression),
     location: hasMapLocation(record.location) ? { ...record.location } : null,
@@ -3197,6 +3915,11 @@ function formatGender(gender) {
   return "-";
 }
 
+function formatEthnicGroup(value) {
+  const normalized = normalizeEthnicGroup(value);
+  return normalized || "-";
+}
+
 function formatActivityType(value) {
   if (Array.isArray(value)) {
     const normalized = normalizeActivityTypeSelection(value);
@@ -3282,6 +4005,17 @@ function normalizeGender(value) {
     return value;
   }
   return null;
+}
+
+function normalizeEthnicGroup(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  const allowedValues = ["Chinese", "Malay", "Indian", "Others"];
+  const matchedValue = allowedValues.find((candidate) => candidate.toLowerCase() === normalized.toLowerCase());
+  return matchedValue || null;
 }
 
 function normalizeAgeGroup(value) {

@@ -11,6 +11,11 @@ urlpatterns = [
   path("api/locate-via-gps/", views.api_locate_via_gps, name="api_locate_via_gps"),
   path("api/records/", views.api_records, name="api_records"),
   path("api/site-observations/", views.api_site_observations, name="api_site_observations"),
+  path(
+    "api/person-questionnaire-responses/",
+    views.api_person_questionnaire_responses,
+    name="api_person_questionnaire_responses",
+  ),
   path("api/records/export/", views.api_records_export, name="api_records_export"),
   path("api/records/<uuid:record_id>/", views.api_record_detail, name="api_record_detail"),
   path(

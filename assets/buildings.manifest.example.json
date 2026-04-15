@@ -1,0 +1,27 @@
+{
+  "assetsBaseUrl": "https://hubhumanactivities.blob.core.windows.net/assets",
+  "buildings": {
+    "SUTD": {
+      "label": "SUTD",
+      "address": "",
+      "floors": {
+        "whole-campus": {
+          "label": "Whole Campus",
+          "mapSrc": "SUTD/whole-campus.svg"
+        },
+        "ground-floor": {
+          "label": "Floor 1",
+          "mapSrc": "SUTD/ground-floor.svg"
+        },
+        "second-floor": {
+          "label": "Floor 2",
+          "mapSrc": "SUTD/second-floor.svg"
+        },
+        "main-buildings": {
+          "label": "Floor 3",
+          "mapSrc": "SUTD/main-buildings.svg"
+        }
+      }
+    }
+  }
+}

@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Indoor Activity Location Recorder</title>
-  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260413-1">
+  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260415-3">
 </head>
 <body>
   <header class="topbar">
@@ -48,6 +48,13 @@
         <path d="M12 9.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6Z" fill="none" stroke="currentColor" stroke-width="1.7"/>
       </svg>
       <span class="sr-only">Open site observation tools</span>
+    </button>
+    <button id="personQuestionnaireBtn" type="button" class="fab-button person-questionnaire-button" title="Person questionnaire">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M7 3.5h7.2L18 7.3V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M14 3.8V8h4M9 11h6M9 14.5h6M9 18h3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="sr-only">Open person questionnaire</span>
     </button>
     <p id="observationStatus" class="observation-status" data-state="muted" role="status" aria-live="polite"></p>
     <input id="observationPhotoInput" type="file" accept="image/*" capture="environment" hidden>
@@ -158,6 +165,17 @@
             <div class="gender-controls" id="genderControls">
               <button type="button" class="toggle-btn gender-btn" data-gender="male" aria-pressed="false" title="Male">👨</button>
               <button type="button" class="toggle-btn gender-btn" data-gender="female" aria-pressed="false" title="Female">👩</button>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <span class="mandatory">Ethnic Group</span>
+            <input id="ethnicGroup" type="hidden">
+            <div class="gender-controls ethnic-group-controls" id="ethnicGroupControls" role="group" aria-label="Ethnic group">
+              <button type="button" class="toggle-btn ethnic-group-btn" data-ethnic-group="Chinese" aria-pressed="false">Chinese</button>
+              <button type="button" class="toggle-btn ethnic-group-btn" data-ethnic-group="Malay" aria-pressed="false">Malay</button>
+              <button type="button" class="toggle-btn ethnic-group-btn" data-ethnic-group="Indian" aria-pressed="false">Indian</button>
+              <button type="button" class="toggle-btn ethnic-group-btn" data-ethnic-group="Others" aria-pressed="false">Others</button>
             </div>
           </div>
 
@@ -369,6 +387,59 @@
     </div>
   </div>
 
+  <div id="personQuestionnaireSelectModal" class="modal-shell" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-person-questionnaire-select-close></div>
+    <div class="modal-card person-questionnaire-select-card" role="dialog" aria-modal="true" aria-labelledby="personQuestionnaireSelectTitle">
+      <form id="personQuestionnaireSelectForm" class="person-questionnaire-select-form">
+        <div class="modal-head">
+          <div>
+            <h3 id="personQuestionnaireSelectTitle">Choose People</h3>
+            <p id="personQuestionnaireSelectSubtitle" class="modal-subtitle">Pick from the most recently uploaded activity records.</p>
+          </div>
+        </div>
+
+        <div id="personQuestionnaireSelectBody" class="person-questionnaire-select-body"></div>
+
+        <p id="personQuestionnaireSelectPrompt" class="save-prompt" data-state="muted" role="status" aria-live="polite"></p>
+
+        <div class="actions modal-actions">
+          <button id="personQuestionnaireSelectBackBtn" type="button" class="secondary">Cancel</button>
+          <button id="personQuestionnaireSelectNextBtn" type="submit">Continue</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="personQuestionnaireModal" class="modal-shell" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-person-questionnaire-close></div>
+    <div class="modal-card person-questionnaire-card" role="dialog" aria-modal="true" aria-labelledby="personQuestionnaireTitle">
+      <form id="personQuestionnaireForm" class="person-questionnaire-form">
+        <div class="modal-head">
+          <div>
+            <h3 id="personQuestionnaireTitle">Person Questionnaire</h3>
+            <p id="personQuestionnaireSubtitle" class="modal-subtitle">Selected people</p>
+          </div>
+        </div>
+
+        <div class="person-questionnaire-progress">
+          <span id="personQuestionnaireProgress">Question 1 of 5</span>
+        </div>
+
+        <fieldset class="person-questionnaire-question">
+          <legend id="personQuestionnaireQuestionText"></legend>
+          <div id="personQuestionnaireOptions" class="person-questionnaire-options"></div>
+        </fieldset>
+
+        <p id="personQuestionnairePrompt" class="save-prompt" data-state="muted" role="status" aria-live="polite"></p>
+
+        <div class="actions modal-actions person-questionnaire-navigation">
+          <button id="personQuestionnairePrevBtn" type="button" class="secondary" aria-label="Previous question">&lt;-</button>
+          <button id="personQuestionnaireNextBtn" type="submit" aria-label="Next question">-&gt;</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div id="activityNoteModal" class="modal-shell" hidden aria-hidden="true">
     <div class="modal-backdrop" data-activity-note-close></div>
     <div class="modal-card observation-modal-card" role="dialog" aria-modal="true" aria-labelledby="activityNoteModalTitle">
@@ -429,6 +500,6 @@
   </div>
 
   {{ activity_catalog|json_script:"activityCatalogData" }}
-  <script type="module" src="{% static 'collector/app.js' %}?v=20260413-1"></script>
+  <script type="module" src="{% static 'collector/app.js' %}?v=20260415-2"></script>
 </body>
 </html>

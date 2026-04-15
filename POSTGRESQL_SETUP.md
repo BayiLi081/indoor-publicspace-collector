@@ -57,6 +57,8 @@ Notes:
 ### Created automatically by Django `migrate`
 
 - `collector_activityrecord`
+- `collector_siteobservation`
+- `collector_personquestionnaireresponse`
 - `django_migrations`
 - `django_content_type`
 - `auth_permission`
@@ -97,6 +99,25 @@ Important indexes created by Django:
 - index on `building_id`
 - index on `floor_id`
 - index on `activity_time`
+
+## Person Questionnaire Table
+
+The person questionnaire table is `collector_personquestionnaireresponse`.
+
+It links each questionnaire answer set to `collector_activityrecord.id` through `activity_record_id`, and also stores the visible `actor_id` person ID for easier review.
+
+Current response columns:
+
+- `id` UUID primary key
+- `created_at`
+- `activity_record_id`
+- `actor_id`
+- `questionnaire_time`
+- `main_purpose`
+- `visit_frequency`
+- `stay_duration`
+- `overall_rating`
+- `social_interaction`
 
 ## 1. Create PostgreSQL User And Database
 

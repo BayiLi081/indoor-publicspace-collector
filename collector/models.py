@@ -51,6 +51,58 @@ class ActivityRecord(models.Model):
     return f"{self.activity_type} @ {self.building_id}/{self.floor_id} ({self.activity_time.isoformat()})"
 
 
+class PersonQuestionnaireResponse(models.Model):
+  MAIN_PURPOSE_CHOICES = (
+    ("errand_transit", "Errand / transit (necessary)"),
+    ("relaxing_passing_time", "Relaxing / passing time (optional)"),
+    ("meeting_people_social", "Meeting people / social activity"),
+  )
+  VISIT_FREQUENCY_CHOICES = (
+    ("daily", "Daily"),
+    ("1_4_times_per_week", "1-4 times per week"),
+    ("1_3_times_per_month", "1-3 times per month"),
+    ("first_time", "First time"),
+  )
+  STAY_DURATION_CHOICES = (
+    ("under_5_minutes", "<5 minutes"),
+    ("5_20_minutes", "5-20 minutes"),
+    ("20_60_minutes", "20-60 minutes"),
+    ("over_60_minutes", ">60 minutes"),
+  )
+  SOCIAL_INTERACTION_CHOICES = (
+    ("not_at_all", "Not at all"),
+    ("slightly", "Slightly"),
+    ("moderately", "Moderately"),
+    ("yes", "Yes"),
+    ("definitely", "Definitely"),
+  )
+
+  id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+  created_at = models.DateTimeField(auto_now_add=True)
+  activity_record = models.ForeignKey(
+    ActivityRecord,
+    on_delete=models.CASCADE,
+    related_name="questionnaire_responses",
+  )
+  actor_id = models.CharField(max_length=128, blank=True, db_index=True)
+  questionnaire_time = models.DateTimeField(db_index=True, default=timezone.now)
+  main_purpose = models.CharField(max_length=64, choices=MAIN_PURPOSE_CHOICES)
+  visit_frequency = models.CharField(max_length=64, choices=VISIT_FREQUENCY_CHOICES)
+  stay_duration = models.CharField(max_length=64, choices=STAY_DURATION_CHOICES)
+  overall_rating = models.PositiveSmallIntegerField()
+  social_interaction = models.CharField(max_length=64, choices=SOCIAL_INTERACTION_CHOICES)
+
+  class Meta:
+    ordering = ["-questionnaire_time", "-created_at"]
+
+  def clean(self) -> None:
+    if self.overall_rating is not None and not 1 <= self.overall_rating <= 5:
+      raise ValidationError({"overallRating": ["Overall rating must be between 1 and 5."]})
+
+  def __str__(self) -> str:
+    return f"Questionnaire for {self.actor_id or self.activity_record_id} ({self.questionnaire_time.isoformat()})"
+
+
 class SiteObservation(models.Model):
   OBSERVATION_TYPE_CHOICES = (
     ("photo", "Photo"),

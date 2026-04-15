@@ -309,6 +309,7 @@ function getFilteredRecords() {
         formatActivityType(record.activityType),
         record.actorId,
         formatGender(record.gender),
+        formatEthnicGroup(record.ethnicGroup),
         formatAgeGroup(record.ageGroup),
         formatFacialExpression(record.facialExpression),
         record.notes,
@@ -769,6 +770,7 @@ function renderRecordPopupBody(record, clusterSize = 0) {
   const items = [
     ["Activity Type", formatActivityType(record.activityType)],
     ["Gender", formatGender(record.gender)],
+    ["Ethnic Group", formatEthnicGroup(record.ethnicGroup)],
     ["Age Group", formatAgeGroup(record.ageGroup)],
     ["Expression", formatFacialExpression(record.facialExpression)],
     ["Time", formatDate(record.activityTime)],
@@ -802,7 +804,7 @@ function renderGroupPopupBody(clusterRecords) {
         <article class="management-map-member-card">
           <strong>${escapeHtml(memberLabel)}${record.actorId ? ` · ${escapeHtml(record.actorId)}` : ""}</strong>
           <span>${escapeHtml(formatActivityType(record.activityType))}</span>
-          <span>${escapeHtml(formatGender(record.gender))} | ${escapeHtml(formatAgeGroup(record.ageGroup))} | ${escapeHtml(formatFacialExpression(record.facialExpression))}</span>
+          <span>${escapeHtml(formatGender(record.gender))} | ${escapeHtml(formatEthnicGroup(record.ethnicGroup))} | ${escapeHtml(formatAgeGroup(record.ageGroup))} | ${escapeHtml(formatFacialExpression(record.facialExpression))}</span>
           <span>${escapeHtml(formatMapLocation(record.location))} | ${escapeHtml(formatDate(record.activityTime))}</span>
         </article>
       `;
@@ -1104,7 +1106,7 @@ function renderRecords() {
 
   if (!filtered.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="13">No records match the current filters.</td>`;
+    tr.innerHTML = `<td colspan="14">No records match the current filters.</td>`;
     recordsTbody.appendChild(tr);
     return;
   }
@@ -1119,6 +1121,7 @@ function renderRecords() {
       <td>${escapeHtml(formatActivityType(record.activityType))}</td>
       <td>${escapeHtml(record.actorId || "-")}</td>
       <td>${escapeHtml(formatGender(record.gender))}</td>
+      <td>${escapeHtml(formatEthnicGroup(record.ethnicGroup))}</td>
       <td>${escapeHtml(formatAgeGroup(record.ageGroup))}</td>
       <td>${escapeHtml(formatFacialExpression(record.facialExpression))}</td>
       <td>${escapeHtml(getBuildingLabel(recordBuildingId))}</td>
@@ -1333,6 +1336,7 @@ function normalizeRecord(record) {
     floorId: typeof record.floorId === "string" && record.floorId.trim() ? record.floorId : null,
     activityType: normalizeActivityTypeValue(record.activityType),
     gender: normalizeGender(record.gender),
+    ethnicGroup: normalizeEthnicGroup(record.ethnicGroup),
     ageGroup: normalizeAgeGroup(record.ageGroup),
     facialExpression: normalizeFacialExpression(record.facialExpression),
     location: hasMapLocation(record.location) ? { ...record.location } : null,
@@ -1619,6 +1623,11 @@ function formatGender(gender) {
   return "-";
 }
 
+function formatEthnicGroup(value) {
+  const normalized = normalizeEthnicGroup(value);
+  return normalized || "-";
+}
+
 function formatActivityType(value) {
   if (Array.isArray(value)) {
     const normalized = normalizeActivityTypeSelection(value);
@@ -1704,6 +1713,17 @@ function normalizeGender(value) {
     return value;
   }
   return null;
+}
+
+function normalizeEthnicGroup(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  const allowedValues = ["Chinese", "Malay", "Indian", "Others"];
+  const matchedValue = allowedValues.find((candidate) => candidate.toLowerCase() === normalized.toLowerCase());
+  return matchedValue || null;
 }
 
 function normalizeAgeGroup(value) {

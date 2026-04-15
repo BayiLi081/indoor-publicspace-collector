@@ -4,6 +4,7 @@ from datetime import datetime, timezone as datetime_timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -35,7 +36,7 @@ from .management_auth import (
   management_access_required,
   validate_management_access_code,
 )
-from .models import ActivityRecord, SiteObservation
+from .models import ActivityRecord, PersonQuestionnaireResponse, SiteObservation
 from .object_storage import build_image_object_url, delete_image_object, save_uploaded_image_object
 
 ROOT_BUILDING_ID = "__root__"
@@ -48,6 +49,18 @@ SHORT_QUESTION_RESPONSE_FIELDS = (
   ("noiseLevel", "noise_level"),
   ("cleanliness", "cleanliness"),
 )
+PERSON_QUESTIONNAIRE_RESPONSE_FIELDS = (
+  ("mainPurpose", "main_purpose"),
+  ("visitFrequency", "visit_frequency"),
+  ("stayDuration", "stay_duration"),
+  ("socialInteraction", "social_interaction"),
+)
+PERSON_QUESTIONNAIRE_ALLOWED_CHOICES = {
+  "mainPurpose": {choice[0] for choice in PersonQuestionnaireResponse.MAIN_PURPOSE_CHOICES},
+  "visitFrequency": {choice[0] for choice in PersonQuestionnaireResponse.VISIT_FREQUENCY_CHOICES},
+  "stayDuration": {choice[0] for choice in PersonQuestionnaireResponse.STAY_DURATION_CHOICES},
+  "socialInteraction": {choice[0] for choice in PersonQuestionnaireResponse.SOCIAL_INTERACTION_CHOICES},
+}
 ALLOWED_GENDERS = {"male", "female"}
 ALLOWED_AGE_GROUPS = {
   "<10 years old",
@@ -318,6 +331,78 @@ def api_site_observations(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
 
   return JsonResponse({"observation": serialize_site_observation(observation)}, status=201)
+
+
+@require_http_methods(["GET", "POST"])
+def api_person_questionnaire_responses(request: HttpRequest) -> JsonResponse:
+  if request.method == "GET":
+    denial_response = get_management_access_denial_response(request)
+    if denial_response is not None:
+      return denial_response
+
+    try:
+      query = PersonQuestionnaireResponse.objects.select_related("activity_record").all()
+
+      record_id = request.GET.get("record_id", "").strip()
+      actor_id = request.GET.get("actor_id", "").strip()
+      if record_id:
+        try:
+          query = query.filter(activity_record_id=UUID(record_id))
+        except (TypeError, ValueError):
+          raise ValidationError({"recordId": ["Record id must be a valid UUID."]})
+      if actor_id:
+        query = query.filter(actor_id=actor_id)
+
+      responses = [serialize_person_questionnaire_response(response) for response in query]
+      return JsonResponse({"responses": responses})
+    except DatabaseError as exc:
+      return database_error_response(exc)
+    except ValidationError as exc:
+      return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
+
+  payload, uploaded_photo, error_response = parse_request_payload(request)
+  if error_response:
+    return error_response
+  if uploaded_photo is not None:
+    return JsonResponse({"error": "Questionnaire responses do not accept photo uploads."}, status=400)
+
+  try:
+    record_ids = parse_questionnaire_record_ids(payload.get("recordIds", payload.get("recordId")))
+    response_values = parse_person_questionnaire_responses(payload.get("responses", payload))
+    questionnaire_time = parse_optional_datetime(payload.get("questionnaireTime"), "questionnaireTime")
+
+    records_by_id = {
+      str(record.id): record
+      for record in ActivityRecord.objects.filter(id__in=record_ids)
+    }
+    missing_ids = [record_id for record_id in record_ids if record_id not in records_by_id]
+    if missing_ids:
+      raise ValidationError({"recordIds": ["One or more selected people no longer exist."]})
+
+    questionnaire_responses = []
+    for record_id in record_ids:
+      activity_record = records_by_id[record_id]
+      response = PersonQuestionnaireResponse(
+        activity_record=activity_record,
+        actor_id=activity_record.actor_id,
+        questionnaire_time=questionnaire_time,
+        **response_values,
+      )
+      response.full_clean()
+      questionnaire_responses.append(response)
+
+    with transaction.atomic():
+      for response in questionnaire_responses:
+        response.save()
+  except DatabaseError as exc:
+    return database_error_response(exc)
+  except ValidationError as exc:
+    return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
+
+  return JsonResponse(
+    {"responses": [serialize_person_questionnaire_response(response) for response in questionnaire_responses]},
+    status=201,
+  )
 
 
 @management_access_required
@@ -616,6 +701,70 @@ def parse_short_question_responses(value: Any, observation_type: str) -> dict[st
   return parsed_values
 
 
+def parse_questionnaire_record_ids(value: Any) -> list[str]:
+  raw_values = value if isinstance(value, list) else [value]
+  if not raw_values or raw_values == [None]:
+    raise ValidationError({"recordIds": ["Select at least one person."]})
+
+  parsed_ids: list[str] = []
+  errors = []
+  for raw_value in raw_values:
+    try:
+      parsed_id = str(UUID(str(raw_value)))
+    except (TypeError, ValueError, AttributeError):
+      errors.append("Record id must be a valid UUID.")
+      continue
+
+    if parsed_id not in parsed_ids:
+      parsed_ids.append(parsed_id)
+
+  if errors:
+    raise ValidationError({"recordIds": errors})
+  if not parsed_ids:
+    raise ValidationError({"recordIds": ["Select at least one person."]})
+  if len(parsed_ids) > 1:
+    raise ValidationError({"recordIds": ["Select only one person for each questionnaire response."]})
+
+  return parsed_ids
+
+
+def parse_person_questionnaire_responses(value: Any) -> dict[str, Any]:
+  if not isinstance(value, dict):
+    raise ValidationError({"responses": ["Questionnaire responses are required."]})
+
+  parsed_values: dict[str, Any] = {}
+  errors: dict[str, list[str]] = {}
+
+  for payload_key, model_field in PERSON_QUESTIONNAIRE_RESPONSE_FIELDS:
+    raw_value = value.get(payload_key)
+    allowed_values = PERSON_QUESTIONNAIRE_ALLOWED_CHOICES[payload_key]
+    if not isinstance(raw_value, str) or raw_value.strip() not in allowed_values:
+      errors[f"responses.{payload_key}"] = ["Select one of the provided options."]
+      continue
+    parsed_values[model_field] = raw_value.strip()
+
+  raw_rating = value.get("overallRating")
+  if raw_rating is None or (isinstance(raw_rating, str) and not raw_rating.strip()):
+    errors["responses.overallRating"] = ["Overall rating is required."]
+  elif isinstance(raw_rating, bool):
+    errors["responses.overallRating"] = ["Overall rating must be between 1 and 5."]
+  elif isinstance(raw_rating, float) and not raw_rating.is_integer():
+    errors["responses.overallRating"] = ["Overall rating must be between 1 and 5."]
+  else:
+    try:
+      parsed_rating = int(raw_rating)
+      if parsed_rating < 1 or parsed_rating > 5:
+        raise ValueError
+      parsed_values["overall_rating"] = parsed_rating
+    except (TypeError, ValueError):
+      errors["responses.overallRating"] = ["Overall rating must be between 1 and 5."]
+
+  if errors:
+    raise ValidationError(errors)
+
+  return parsed_values
+
+
 def parse_activity_type(value: Any) -> str:
   if isinstance(value, str):
     raw_values = value.split(",")
@@ -873,6 +1022,26 @@ def serialize_site_observation(observation: SiteObservation) -> dict[str, Any]:
     "photoPreview": observation.photo_preview_data_url or None,
     "photoLocation": photo_location,
     "shortQuestionResponses": short_question_responses,
+  }
+
+
+def serialize_person_questionnaire_response(response: PersonQuestionnaireResponse) -> dict[str, Any]:
+  activity_record = response.activity_record
+  return {
+    "id": str(response.id),
+    "createdAt": isoformat_utc(response.created_at),
+    "questionnaireTime": isoformat_utc(response.questionnaire_time),
+    "recordId": str(response.activity_record_id),
+    "actorId": response.actor_id or activity_record.actor_id,
+    "buildingId": activity_record.building_id,
+    "floorId": activity_record.floor_id,
+    "responses": {
+      "mainPurpose": response.main_purpose,
+      "visitFrequency": response.visit_frequency,
+      "stayDuration": response.stay_duration,
+      "overallRating": response.overall_rating,
+      "socialInteraction": response.social_interaction,
+    },
   }
 
 

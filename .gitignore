@@ -62,3 +62,8 @@ pnpm-debug.log*
 # since there is scripts to transform .jpg to .svg, we can ignore .jpg files
 *.jpg
 media/*.png
+
+/assets/*
+!/assets/.gitkeep
+!/assets/buildings.manifest.example.json
+!/assets/SUTD/*
