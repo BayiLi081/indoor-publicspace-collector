@@ -185,6 +185,7 @@ let selectedPhotoLocation = null;
 let selectedPhotoName = "";
 let isPhotoLocationLoading = false;
 let buildingMaps = {};
+let assetsBaseUrl = "";
 let currentBuildingId = "";
 let currentFloorId = "";
 let isCollecting = false;
@@ -436,6 +437,8 @@ async function fetchBuildingMaps() {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return null;
     }
+
+    assetsBaseUrl = normalizeAssetsBaseUrl(payload.assetsBaseUrl);
 
     if (payload.buildings && typeof payload.buildings === "object" && !Array.isArray(payload.buildings)) {
       return payload.buildings;
@@ -3075,6 +3078,10 @@ function normalizeBuildingMaps(rawMaps) {
           : formatBuildingLabel(buildingId),
       floors,
     };
+
+    if (typeof rawBuilding.poiSrc === "string" && rawBuilding.poiSrc.trim()) {
+      normalized[buildingId].poiSrc = rawBuilding.poiSrc.trim();
+    }
   });
 
   return normalized;
@@ -3473,11 +3480,64 @@ function buildPoiOverlayStatus(buildingId, floorId) {
 }
 
 function getPoiAssetUrl(buildingId) {
-  if (buildingId === ROOT_BUILDING_ID) {
-    return "/assets/poi.json";
+  const building = buildingMaps[buildingId];
+  if (building && typeof building.poiSrc === "string" && building.poiSrc.trim()) {
+    return building.poiSrc.trim();
   }
 
-  return `/assets/${encodeURIComponent(buildingId)}/poi.json`;
+  if (buildingId === ROOT_BUILDING_ID) {
+    return buildAssetUrl("poi.json");
+  }
+
+  return buildAssetUrl(`${buildingId}/poi.json`);
+}
+
+function buildAssetUrl(relativePath) {
+  const rawPath = String(relativePath || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/^\.\/+/, "");
+  const { path, suffix } = splitAssetPathSuffix(rawPath);
+
+  if (!assetsBaseUrl) {
+    return path.startsWith("assets/") ? `/${encodeAssetPath(path)}${suffix}` : `/assets/${encodeAssetPath(path)}${suffix}`;
+  }
+
+  const normalizedPath =
+    path.startsWith("assets/") && assetsBaseUrl.endsWith("/assets") ? path.slice("assets/".length) : path;
+  return `${assetsBaseUrl}/${encodeAssetPath(normalizedPath)}${suffix}`;
+}
+
+function splitAssetPathSuffix(value) {
+  const hashIndex = value.indexOf("#");
+  const pathAndQuery = hashIndex === -1 ? value : value.slice(0, hashIndex);
+  const fragment = hashIndex === -1 ? "" : value.slice(hashIndex);
+  const queryIndex = pathAndQuery.indexOf("?");
+
+  if (queryIndex === -1) {
+    return { path: pathAndQuery, suffix: fragment };
+  }
+
+  return {
+    path: pathAndQuery.slice(0, queryIndex),
+    suffix: `${pathAndQuery.slice(queryIndex)}${fragment}`,
+  };
+}
+
+function encodeAssetPath(path) {
+  return path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function normalizeAssetsBaseUrl(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().replace(/\/+$/, "");
 }
 
 async function loadPoiMapsForBuilding(buildingId) {

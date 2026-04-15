@@ -6,6 +6,8 @@ from typing import Any, Dict, List
 
 from django.conf import settings
 
+from .asset_urls import build_asset_url, fetch_json_from_url, get_effective_assets_base_url
+
 GPS_MAP_FILENAME = "gps-map.json"
 ROOT_BUILDING_ID = "__root__"
 
@@ -212,25 +214,54 @@ def _load_building_calibration(building_id: str) -> Dict[str, Any]:
   if building_id in _CALIBRATION_CACHE:
     return _CALIBRATION_CACHE[building_id]
 
-  map_path = _resolve_gps_map_path(building_id)
-  if not map_path or not map_path.exists():
-    calibration: Dict[str, Any] = {}
-    _CALIBRATION_CACHE[building_id] = calibration
-    return calibration
-
-  try:
-    payload = json.loads(map_path.read_text(encoding="utf-8"))
-  except (OSError, json.JSONDecodeError) as error:
-    raise GPSMappingError(f"Could not read GPS map for {building_id}: {error}")
+  payload = _load_remote_building_calibration(building_id)
+  if payload is None:
+    payload = _load_local_building_calibration(building_id)
 
   if not isinstance(payload, dict):
-    calibration = {}
+    calibration: Dict[str, Any] = {}
     _CALIBRATION_CACHE[building_id] = calibration
     return calibration
 
   calibration = {str(key): value for key, value in payload.items() if isinstance(key, str)}
   _CALIBRATION_CACHE[building_id] = calibration
   return calibration
+
+
+def _load_remote_building_calibration(building_id: str) -> Dict[str, Any] | None:
+  assets_base_url = get_effective_assets_base_url()
+  if not assets_base_url:
+    return None
+
+  gps_map_url = build_asset_url(_get_gps_map_asset_path(building_id), assets_base_url=assets_base_url)
+  timeout_secs = getattr(settings, "BUILDINGS_MANIFEST_TIMEOUT_SECS", 10)
+  payload = fetch_json_from_url(gps_map_url, timeout=timeout_secs, label=f"GPS map for {building_id}")
+  if isinstance(payload, dict):
+    return payload
+
+  return None
+
+
+def _load_local_building_calibration(building_id: str) -> Dict[str, Any] | None:
+  map_path = _resolve_gps_map_path(building_id)
+  if not map_path or not map_path.exists():
+    return None
+
+  try:
+    local_payload = json.loads(map_path.read_text(encoding="utf-8"))
+  except (OSError, json.JSONDecodeError) as error:
+    raise GPSMappingError(f"Could not read GPS map for {building_id}: {error}")
+
+  if isinstance(local_payload, dict):
+    return local_payload
+
+  return None
+
+
+def _get_gps_map_asset_path(building_id: str) -> str:
+  if building_id == ROOT_BUILDING_ID:
+    return GPS_MAP_FILENAME
+  return f"{building_id}/{GPS_MAP_FILENAME}"
 
 
 def _resolve_gps_map_path(building_id: str) -> Path | None:

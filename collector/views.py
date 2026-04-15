@@ -24,6 +24,7 @@ from .activity_catalog import (
   INDIVIDUAL_ACTIVITY_TYPE_OPTIONS,
   build_activity_catalog_payload,
 )
+from .asset_urls import get_effective_assets_base_url
 from .building_catalog import discover_building_maps as discover_building_maps_catalog
 from .floorplan_svg import convert_jpg_floorplan_to_svg, should_regenerate_jpg_wrapper
 from .locate_via_gps import GPSMappingError, get_floor_heading_offset, locate_map_point_from_gps
@@ -138,9 +139,8 @@ def management(request: HttpRequest) -> HttpResponse:
 
 @require_http_methods(["GET"])
 def api_buildings(request: HttpRequest) -> JsonResponse:
-  print("DEBUG: Entered api_buildings view.") # New Debug print 1
   building_maps = discover_building_maps_catalog()
-  return JsonResponse({"buildings": building_maps})
+  return JsonResponse({"buildings": building_maps, "assetsBaseUrl": get_effective_assets_base_url()})
 
 
 @require_http_methods(["GET"])

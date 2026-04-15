@@ -31,17 +31,17 @@ This project has been rewritten from a static site into a Django application wit
 - Persistent activity records stored in SQLite via Django ORM.
 - JSON API endpoints for building/floor metadata and record CRUD/export.
 - Existing interactive frontend behavior retained (map click markers, photo GPS extraction, search, delete, export).
-- Building/floor map discovery performed on the server from `assets/` (with optional manifest support).
+- Building/floor map discovery performed on the server from a remote manifest, a local manifest, or the local `assets/` folder.
 
 ## Features
 
-- Auto-discover buildings from `assets/` subfolders and let users choose building first.
+- Load buildings from a remote manifest or auto-discover buildings from `assets/` subfolders, then let users choose building first.
 - Auto-discover floor map files per selected building and let users choose floor next.
 - Display a different indoor map per selected building/floor.
 - Click any point on the map to select an indoor location.
 - Capture/upload an image and extract GPS metadata (if available).
-- Use the "Locate via GPS" button to convert the device location into map percentages (calibrated via `assets/<building>/gps-map.json`), then show the current position and device direction on the floor plan when supported by the browser.
-- Use the "Locate via POI" button to show named points of interest from `assets/<building>/poi.json` on the current floor plan.
+- Use the "Locate via GPS" button to convert the device location into map percentages (calibrated via `<building>/gps-map.json` in the configured assets location), then show the current position and device direction on the floor plan when supported by the browser.
+- Use the "Locate via POI" button to show named points of interest from `<building>/poi.json` in the configured assets location on the current floor plan.
 - Save activity details (type, ID, timestamp, notes) with map point and/or photo GPS.
 - Save quick site observations from the floating camera or note buttons without mixing them into the structured activity survey dataset.
 
@@ -53,7 +53,7 @@ This project has been rewritten from a static site into a Django application wit
 - `manage.py`
 - `indoor_collector/` Django project settings and root URL config.
 - `collector/` Django app (models, views, API, template, static frontend files).
-- `assets/` building/floor map files served at `/assets/...`.
+- `assets/` optional local building/floor map files. Production floor plans can be served directly from Azure Blob Storage.
 
 ## Database Setup
 
@@ -184,6 +184,7 @@ Notes:
 - This setup changes uploaded image storage only. Static files are still handled separately by Django/App Service.
 - If your blob container is private, keep `AZURE_URL_EXPIRATION_SECS` set so generated image links are signed and time-limited.
 - The Azure storage backend does not create containers automatically, so create `media` before testing uploads.
+- Floor plan assets can use a separate public container such as `assets`; configure `DJANGO_ASSETS_BASE_URL` for that container.
 
 ## API Endpoints
 
@@ -197,16 +198,53 @@ Notes:
 
 ## Assets Discovery
 
-The server discovers maps in `assets/` using:
+The server discovers maps in this order:
 
-1. `assets/buildings.manifest.json` (if present and valid), else
-2. filesystem scan of `assets/` directories/files.
+1. `DJANGO_BUILDINGS_MANIFEST_URL`, if set.
+2. `DJANGO_ASSETS_BASE_URL/buildings.manifest.json`, if `DJANGO_ASSETS_BASE_URL` is set.
+3. `assets/buildings.manifest.json`, if present and valid.
+4. filesystem scan of `assets/` directories/files.
 
-Additionally, optional `assets/<building>/gps-map.json` files can describe floor-level `referencePoints` (each with `xPct`, `yPct`, `latitude`, and `longitude`). The helper in `collector/locate_via_gps.py` uses those anchors to translate device GPS coordinates into map percentages for the Locate via GPS button.
+For Azure Blob Storage, upload `buildings.manifest.json` to the public `assets` container and configure:
+
+```text
+DJANGO_ASSETS_BASE_URL=https://hubhumanactivities.blob.core.windows.net/assets
+DJANGO_BUILDINGS_MANIFEST_URL=https://hubhumanactivities.blob.core.windows.net/assets/buildings.manifest.json
+```
+
+`DJANGO_BUILDINGS_MANIFEST_URL` is optional when the manifest is named `buildings.manifest.json` and is stored at the root of `DJANGO_ASSETS_BASE_URL`.
+
+Example remote manifest:
+
+```json
+{
+  "assetsBaseUrl": "https://hubhumanactivities.blob.core.windows.net/assets",
+  "buildings": {
+    "Bukit-Canberra": {
+      "label": "Bukit Canberra",
+      "address": "",
+      "floors": {
+        "Second_Floor": {
+          "label": "Second Floor",
+          "mapSrc": "Bukit-Canberra/Second_Floor.svg"
+        }
+      }
+    }
+  }
+}
+```
+
+`mapSrc` can be a full URL or a path relative to `assetsBaseUrl`. With the example above, the app resolves it to:
+
+```text
+https://hubhumanactivities.blob.core.windows.net/assets/Bukit-Canberra/Second_Floor.svg
+```
+
+Additionally, optional `<building>/gps-map.json` files in the same assets location can describe floor-level `referencePoints` (each with `xPct`, `yPct`, `latitude`, and `longitude`). The helper in `collector/locate_via_gps.py` checks the remote assets base first, then the local `assets/` folder, and uses those anchors to translate device GPS coordinates into map percentages for the Locate via GPS button.
 
 Each floor object may also include an optional `headingOffsetDeg` value. This offset is added to the device heading before drawing the direction arrow, which is useful when the floor plan image is not aligned to north.
 
-Optional `assets/<building>/poi.json` files can describe floor-level `referencePoints` for points of interest. Each POI entry should include `xPct`, `yPct`, and `name`, for example:
+Optional `<building>/poi.json` files in the same assets location can describe floor-level `referencePoints` for points of interest. Each POI entry should include `xPct`, `yPct`, and `name`, for example:
 
 ```json
 {
@@ -237,6 +275,7 @@ Supported map file extensions:
 - Local development uses filesystem-backed object storage under `media/objects/...`, so local testing already follows an object-store-style path layout.
 - Azure Blob Storage is supported through `storages.backends.azure_storage.AzureStorage` plus App Service environment variables.
 - For production, serve static files and `/assets/` through your web server (Nginx/Apache/CDN) rather than Django's development server.
+- If POI JSON is loaded directly from Azure Blob Storage in the browser, configure Blob service CORS to allow your App Service origin.
 
 ## Troubleshooting
 

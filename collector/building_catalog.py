@@ -5,6 +5,16 @@ from typing import Any
 
 from django.conf import settings
 
+from .asset_urls import (
+  build_asset_url,
+  fetch_json_from_url,
+  get_buildings_manifest_url,
+  get_configured_assets_base_url,
+  get_effective_assets_base_url,
+  get_url_parent,
+  is_absolute_http_url,
+  normalize_base_url,
+)
 from .floorplan_svg import convert_jpg_floorplan_to_svg, should_regenerate_jpg_wrapper
 
 ROOT_BUILDING_ID = "__root__"
@@ -19,9 +29,13 @@ MAP_EXTENSION_PRIORITY = {
 
 
 def discover_building_maps() -> dict[str, Any]:
-  manifest_maps = discover_buildings_from_manifest()
+  remote_manifest_maps, remote_assets_base_url = discover_buildings_from_remote_manifest()
+  if has_any_building_floors(remote_manifest_maps):
+    return normalize_building_maps(remote_manifest_maps, assets_base_url=remote_assets_base_url)
+
+  manifest_maps, manifest_assets_base_url = discover_buildings_from_manifest()
   if has_any_building_floors(manifest_maps):
-    return normalize_building_maps(manifest_maps)
+    return normalize_building_maps(manifest_maps, assets_base_url=manifest_assets_base_url)
 
   listed_maps = discover_buildings_from_assets_folder()
   if has_any_building_floors(listed_maps):
@@ -30,24 +44,46 @@ def discover_building_maps() -> dict[str, Any]:
   return normalize_building_maps(legacy_building_maps())
 
 
-def discover_buildings_from_manifest() -> dict[str, Any] | None:
+def discover_buildings_from_remote_manifest() -> tuple[dict[str, Any] | None, str]:
+  manifest_url = get_buildings_manifest_url()
+  if not manifest_url:
+    return None, ""
+
+  timeout_secs = getattr(settings, "BUILDINGS_MANIFEST_TIMEOUT_SECS", 10)
+  payload = fetch_json_from_url(manifest_url, timeout=timeout_secs, label="buildings manifest")
+  if not isinstance(payload, dict):
+    return None, ""
+
+  fallback_assets_base_url = get_configured_assets_base_url() or get_url_parent(manifest_url)
+  return extract_buildings_from_manifest_payload(payload, fallback_assets_base_url=fallback_assets_base_url)
+
+
+def discover_buildings_from_manifest() -> tuple[dict[str, Any] | None, str]:
   manifest_path = settings.ASSETS_DIR / "buildings.manifest.json"
   if not manifest_path.exists():
-    return None
+    return None, ""
 
   try:
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
   except (OSError, json.JSONDecodeError):
-    return None
+    return None, ""
 
   if not isinstance(payload, dict):
-    return None
+    return None, ""
 
+  return extract_buildings_from_manifest_payload(payload, fallback_assets_base_url=get_effective_assets_base_url())
+
+
+def extract_buildings_from_manifest_payload(
+  payload: dict[str, Any],
+  fallback_assets_base_url: str = "",
+) -> tuple[dict[str, Any] | None, str]:
+  assets_base_url = normalize_base_url(payload.get("assetsBaseUrl")) or normalize_base_url(fallback_assets_base_url)
   buildings = payload.get("buildings")
   if isinstance(buildings, dict):
-    return buildings
+    return buildings, assets_base_url
 
-  return payload
+  return payload, assets_base_url
 
 
 def discover_buildings_from_assets_folder() -> dict[str, Any]:
@@ -101,7 +137,7 @@ def extract_floor_maps(folder: Path) -> dict[str, Any]:
     relative_path = floor_map_path.relative_to(settings.ASSETS_DIR).as_posix()
     floors[floor_id] = {
       "label": format_floor_label(floor_id),
-      "mapSrc": f"/assets/{relative_path}",
+      "mapSrc": build_asset_url(relative_path),
     }
 
   return floors
@@ -131,7 +167,7 @@ def legacy_building_maps() -> dict[str, Any]:
     floor_id = path.stem
     fallback_floors[floor_id] = {
       "label": format_floor_label(floor_id),
-      "mapSrc": f"/assets/{filename}",
+      "mapSrc": build_asset_url(filename),
     }
 
   if not fallback_floors:
@@ -146,7 +182,7 @@ def legacy_building_maps() -> dict[str, Any]:
   }
 
 
-def normalize_building_maps(raw_maps: Any) -> dict[str, Any]:
+def normalize_building_maps(raw_maps: Any, assets_base_url: str = "") -> dict[str, Any]:
   if not isinstance(raw_maps, dict):
     return {}
 
@@ -173,7 +209,7 @@ def normalize_building_maps(raw_maps: Any) -> dict[str, Any]:
       normalized_floor_id = str(floor_id)
       floors[normalized_floor_id] = {
         "label": optional_text(floor.get("label"), format_floor_label(normalized_floor_id)),
-        "mapSrc": normalize_map_src(map_src),
+        "mapSrc": normalize_map_src(map_src, assets_base_url=assets_base_url),
       }
 
     if not floors:
@@ -186,6 +222,13 @@ def normalize_building_maps(raw_maps: Any) -> dict[str, Any]:
       "floors": floors,
     }
 
+    poi_src = building.get("poiSrc")
+    if isinstance(poi_src, str) and poi_src.strip():
+      normalized[normalized_building_id]["poiSrc"] = normalize_map_src(
+        poi_src,
+        assets_base_url=assets_base_url,
+      )
+
   return normalized
 
 
@@ -195,16 +238,13 @@ def optional_text(value: Any, default: str) -> str:
   return default
 
 
-def normalize_map_src(value: str) -> str:
+def normalize_map_src(value: str, assets_base_url: str = "") -> str:
   src = value.strip()
-  if src.startswith("http://") or src.startswith("https://") or src.startswith("/"):
+  if is_absolute_http_url(src) or src.startswith("/"):
     return src
 
   src = src.lstrip("./")
-  if src.startswith("assets/"):
-    return f"/{src}"
-
-  return f"/assets/{src}"
+  return build_asset_url(src, assets_base_url=assets_base_url)
 
 
 def has_any_building_floors(candidate_maps: Any) -> bool:
