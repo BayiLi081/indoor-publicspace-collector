@@ -57,6 +57,7 @@ Notes:
 ### Created automatically by Django `migrate`
 
 - `collector_activityrecord`
+- `collector_activityidsequence`
 - `collector_siteobservation`
 - `collector_personquestionnaireresponse`
 - `django_migrations`
@@ -229,6 +230,7 @@ You should see at least:
 
 - `buildings`
 - `collector_activityrecord`
+- `collector_activityidsequence`
 - the Django framework tables listed above
 
 To inspect synced buildings:

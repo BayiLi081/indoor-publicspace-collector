@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import ActivityRecord, PersonQuestionnaireResponse
+from .models import ActivityIdSequence, ActivityRecord, PersonQuestionnaireResponse
 
 
 @admin.register(ActivityRecord)
@@ -34,3 +34,9 @@ class PersonQuestionnaireResponseAdmin(admin.ModelAdmin):
   list_filter = ("main_purpose", "visit_frequency", "stay_duration", "overall_rating", "social_interaction")
   search_fields = ("actor_id", "activity_record__actor_id")
   ordering = ("-questionnaire_time",)
+
+
+@admin.register(ActivityIdSequence)
+class ActivityIdSequenceAdmin(admin.ModelAdmin):
+  list_display = ("key", "next_cluster_number", "updated_at")
+  readonly_fields = ("updated_at",)

@@ -51,6 +51,19 @@ class ActivityRecord(models.Model):
     return f"{self.activity_type} @ {self.building_id}/{self.floor_id} ({self.activity_time.isoformat()})"
 
 
+class ActivityIdSequence(models.Model):
+  key = models.CharField(max_length=64, primary_key=True)
+  next_cluster_number = models.PositiveIntegerField(default=1)
+  updated_at = models.DateTimeField(auto_now=True)
+
+  class Meta:
+    verbose_name = "activity ID sequence"
+    verbose_name_plural = "activity ID sequences"
+
+  def __str__(self) -> str:
+    return f"{self.key}: next CL{self.next_cluster_number:04d}"
+
+
 class PersonQuestionnaireResponse(models.Model):
   MAIN_PURPOSE_CHOICES = (
     ("errand_transit", "Errand / transit (necessary)"),

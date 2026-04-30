@@ -190,6 +190,7 @@ Notes:
 
 - `GET /api/buildings/` - returns discovered building/floor map metadata.
 - `GET /api/records/` - list records.
+- `GET /api/records/next-cluster/` - return the next server-backed auto group/person ID.
 - `POST /api/records/` - create a record.
 - `GET /api/site-observations/` - list saved site observations.
 - `POST /api/site-observations/` - create a site observation note or photo entry.

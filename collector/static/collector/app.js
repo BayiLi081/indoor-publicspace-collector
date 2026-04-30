@@ -3,6 +3,7 @@ import { loadActivityCatalog } from "./activity-catalog.js";
 
 const API_BUILDINGS = "/api/buildings/";
 const API_RECORDS = "/api/records/";
+const API_RECORDS_NEXT_CLUSTER = "/api/records/next-cluster/";
 const API_RECORDS_EXPORT = "/api/records/export/";
 const API_SITE_OBSERVATIONS = "/api/site-observations/";
 const API_PERSON_QUESTIONNAIRE_RESPONSES = "/api/person-questionnaire-responses/";
@@ -267,6 +268,7 @@ let isCollecting = false;
 let currentClusterNumber = 0;
 let currentPersonNumber = 0;
 let lastGeneratedClusterNumber = 0;
+let captureActivationToken = 0;
 let savePromptTimerId = 0;
 let observationStatusTimerId = 0;
 let mapZoomLevel = DEFAULT_MAP_ZOOM;
@@ -375,7 +377,9 @@ async function initialize() {
     button.addEventListener("click", () => setSelectedFacialExpression(button.dataset.facialExpression || ""));
   });
   indivGrpButtons.forEach((button) => {
-    button.addEventListener("click", () => activateCaptureMode(button.dataset.indivgrpType || ""));
+    button.addEventListener("click", () => {
+      void activateCaptureMode(button.dataset.indivgrpType || "");
+    });
   });
   if (grpCounterUp && grpCounterDown) {
     grpCounterUp.addEventListener("click", () => changeGroupCount(1));
@@ -598,7 +602,7 @@ function onCollectToggle() {
   finishCollection();
 }
 
-function activateCaptureMode(value) {
+async function activateCaptureMode(value) {
   const mode = normalizeRecordMode(value);
   if (!mode) {
     return;
@@ -609,8 +613,14 @@ function activateCaptureMode(value) {
     return;
   }
 
+  const requestToken = captureActivationToken + 1;
+  captureActivationToken = requestToken;
   setRecordMode(mode);
-  initializeAutoIdsForCollection();
+  setCollectStatus("Preparing capture ID...", "muted");
+  await initializeAutoIdsForCollection();
+  if (requestToken !== captureActivationToken) {
+    return;
+  }
   setCollectionActive(true);
   resetForm(true, false);
   setSavePrompt("", "muted");
@@ -618,6 +628,7 @@ function activateCaptureMode(value) {
 }
 
 function finishCollection(message = "Capture ended. Select Individual or Group to begin again.") {
+  captureActivationToken += 1;
   setCollectionActive(false);
   clearAutoIdsForCollection();
   resetForm(true, false);
@@ -1282,12 +1293,23 @@ function renderGroupPersonList() {
   });
 }
 
-function initializeAutoIdsForCollection() {
-  lastGeneratedClusterNumber = Math.max(lastGeneratedClusterNumber, getMaxKnownClusterNumber(records));
-  currentClusterNumber = lastGeneratedClusterNumber + 1;
-  lastGeneratedClusterNumber = currentClusterNumber;
+async function initializeAutoIdsForCollection() {
+  const nextServerClusterNumber = await fetchNextAutoActorClusterNumber();
+  const nextKnownClusterNumber = Math.max(lastGeneratedClusterNumber, getMaxKnownClusterNumber(records)) + 1;
+  currentClusterNumber = Math.max(nextServerClusterNumber, nextKnownClusterNumber);
   currentPersonNumber = 1;
   actorId.value = buildAutoActorId(currentClusterNumber, currentPersonNumber);
+}
+
+async function fetchNextAutoActorClusterNumber() {
+  try {
+    const payload = await apiGet(API_RECORDS_NEXT_CLUSTER);
+    const nextClusterNumber = Number.parseInt(payload.nextClusterNumber, 10);
+    return Number.isFinite(nextClusterNumber) && nextClusterNumber > 0 ? nextClusterNumber : 0;
+  } catch (error) {
+    console.warn("Could not load next capture ID:", error);
+    return 0;
+  }
 }
 
 function clearAutoIdsForCollection() {
@@ -1320,6 +1342,23 @@ function getCurrentClusterIdLabel() {
     return "";
   }
   return `CL${String(currentClusterNumber).padStart(4, "0")}`;
+}
+
+function getSharedClusterLabel(values) {
+  if (!Array.isArray(values)) {
+    return "";
+  }
+
+  const clusterNumbers = values
+    .map((record) => parseAutoActorId(record && record.actorId))
+    .filter((parsedActor) => parsedActor !== null)
+    .map((parsedActor) => parsedActor.clusterNumber);
+  const uniqueClusterNumbers = Array.from(new Set(clusterNumbers));
+  if (uniqueClusterNumbers.length !== 1) {
+    return "";
+  }
+
+  return `CL${String(uniqueClusterNumbers[0]).padStart(4, "0")}`;
 }
 
 function buildAutoActorId(clusterNumber, personNumber) {
@@ -3211,9 +3250,11 @@ async function onFormSubmit(event) {
       }
 
       records.push(...createdRecords);
+      lastGeneratedClusterNumber = Math.max(lastGeneratedClusterNumber, getMaxKnownClusterNumber(createdRecords));
       latestSavedRecordIds = createdRecords.map((record) => record.id).filter(Boolean);
-      setSavePrompt(`Saved ${createdRecords.length} group records successfully.`, "success");
-      finishCollection(`Group saved with ${createdRecords.length} records. Select Individual or Group for the next capture.`);
+      const savedClusterLabel = getSharedClusterLabel(createdRecords) || getCurrentClusterIdLabel();
+      setSavePrompt(`Saved ${savedClusterLabel} with ${createdRecords.length} records.`, "success");
+      finishCollection(`${savedClusterLabel} saved with ${createdRecords.length} records. Select Individual or Group for the next capture.`);
     } else {
       const response = await apiRequest(API_RECORDS, {
         method: "POST",
@@ -3234,8 +3275,9 @@ async function onFormSubmit(event) {
       }
 
       records.push(createdRecord);
+      lastGeneratedClusterNumber = Math.max(lastGeneratedClusterNumber, getMaxKnownClusterNumber([createdRecord]));
       latestSavedRecordIds = createdRecord.id ? [createdRecord.id] : [];
-      setSavePrompt(`Saved ${autoActorId} successfully.`, "success");
+      setSavePrompt(`Saved ${createdRecord.actorId || autoActorId} successfully.`, "success");
       finishCollection("Individual record saved. Select Individual or Group for the next capture.");
     }
     renderMarkers();

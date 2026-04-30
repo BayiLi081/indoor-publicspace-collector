@@ -58,6 +58,7 @@ ON buildings (name);
 Created by `python manage.py migrate`:
 
 - `collector_activityrecord`
+- `collector_activityidsequence`
 - `collector_siteobservation`
 - `collector_personquestionnaireresponse`
 - `django_migrations`

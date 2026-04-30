@@ -174,6 +174,7 @@ SELECT id, name FROM buildings ORDER BY id;
 Expected Django-managed tables include:
 
 - `collector_activityrecord`
+- `collector_activityidsequence`
 - `collector_siteobservation`
 - `django_migrations`
 - `django_content_type`

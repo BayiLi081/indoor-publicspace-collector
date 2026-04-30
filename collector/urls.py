@@ -10,6 +10,7 @@ urlpatterns = [
   path("api/buildings/", views.api_buildings, name="api_buildings"),
   path("api/locate-via-gps/", views.api_locate_via_gps, name="api_locate_via_gps"),
   path("api/records/", views.api_records, name="api_records"),
+  path("api/records/next-cluster/", views.api_records_next_cluster, name="api_records_next_cluster"),
   path("api/site-observations/", views.api_site_observations, name="api_site_observations"),
   path(
     "api/person-questionnaire-responses/",

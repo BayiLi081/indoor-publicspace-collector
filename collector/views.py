@@ -36,13 +36,15 @@ from .management_auth import (
   management_access_required,
   validate_management_access_code,
 )
-from .models import ActivityRecord, PersonQuestionnaireResponse, SiteObservation
+from .models import ActivityIdSequence, ActivityRecord, PersonQuestionnaireResponse, SiteObservation
 from .object_storage import build_image_object_url, delete_image_object, save_uploaded_image_object
 
 ROOT_BUILDING_ID = "__root__"
 MAP_EXTENSIONS = {".svg", ".png", ".jpg", ".jpeg", ".webp"}
 MAX_PHOTO_PREVIEW_LENGTH = 180_000
 ALLOWED_OBSERVATION_TYPES = {"photo", "note", "questions"}
+AUTO_ACTOR_ID_PATTERN = re.compile(r"^CL(\d+)-P(\d+)$", re.IGNORECASE)
+AUTO_ACTOR_CLUSTER_SEQUENCE_KEY = "auto_actor_cluster"
 SHORT_QUESTION_RESPONSE_FIELDS = (
   ("seatingAvailability", "seating_availability"),
   ("greeneryLevel", "greenery_level"),
@@ -248,10 +250,12 @@ def api_records(request: HttpRequest) -> JsonResponse:
           fallback_photo_object_name=uploaded_photo_object_name,
           fallback_photo_name=uploaded_photo.name if uploaded_photo is not None else "",
         )
-        record.full_clean()
         records.append(record)
 
       with transaction.atomic():
+        assign_auto_actor_ids(records)
+        for record in records:
+          record.full_clean()
         for record in records:
           record.save()
     else:
@@ -260,8 +264,10 @@ def api_records(request: HttpRequest) -> JsonResponse:
         fallback_photo_object_name=uploaded_photo_object_name,
         fallback_photo_name=uploaded_photo.name if uploaded_photo is not None else "",
       )
-      record.full_clean()
-      record.save()
+      with transaction.atomic():
+        assign_auto_actor_ids([record])
+        record.full_clean()
+        record.save()
   except DatabaseError as exc:
     delete_image_object_if_unused(uploaded_photo_object_name)
     return database_error_response(exc)
@@ -273,6 +279,22 @@ def api_records(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"records": [serialize_record(record) for record in records]}, status=201)
 
   return JsonResponse({"record": serialize_record(record)}, status=201)
+
+
+@require_http_methods(["GET"])
+def api_records_next_cluster(request: HttpRequest) -> JsonResponse:
+  try:
+    next_cluster_number = get_next_auto_actor_cluster_number()
+  except DatabaseError as exc:
+    return database_error_response(exc)
+
+  return JsonResponse(
+    {
+      "nextClusterNumber": next_cluster_number,
+      "clusterId": build_auto_actor_cluster_id(next_cluster_number),
+      "firstActorId": build_auto_actor_id(next_cluster_number, 1),
+    }
+  )
 
 
 @require_http_methods(["GET", "POST"])
@@ -543,6 +565,95 @@ def delete_image_object_if_unused(object_name: str) -> None:
     return
 
   delete_image_object(normalized_name)
+
+
+def parse_auto_actor_id(value: Any) -> tuple[int, int] | None:
+  if not isinstance(value, str):
+    return None
+
+  match = AUTO_ACTOR_ID_PATTERN.match(value.strip())
+  if not match:
+    return None
+
+  cluster_number = int(match.group(1))
+  person_number = int(match.group(2))
+  if cluster_number < 1 or person_number < 1:
+    return None
+
+  return cluster_number, person_number
+
+
+def build_auto_actor_cluster_id(cluster_number: int) -> str:
+  return f"CL{cluster_number:04d}"
+
+
+def build_auto_actor_id(cluster_number: int, person_number: int) -> str:
+  return f"{build_auto_actor_cluster_id(cluster_number)}-P{person_number:03d}"
+
+
+def get_max_stored_auto_actor_cluster_number() -> int:
+  max_cluster_number = 0
+  actor_ids = ActivityRecord.objects.filter(actor_id__istartswith="CL").values_list("actor_id", flat=True)
+
+  for actor_id in actor_ids.iterator():
+    parsed_actor_id = parse_auto_actor_id(actor_id)
+    if parsed_actor_id is None:
+      continue
+
+    cluster_number, _ = parsed_actor_id
+    max_cluster_number = max(max_cluster_number, cluster_number)
+
+  return max_cluster_number
+
+
+def get_next_auto_actor_cluster_number() -> int:
+  sequence = ActivityIdSequence.objects.filter(key=AUTO_ACTOR_CLUSTER_SEQUENCE_KEY).first()
+  sequence_next = sequence.next_cluster_number if sequence is not None else 1
+  return max(sequence_next, get_max_stored_auto_actor_cluster_number() + 1)
+
+
+def allocate_auto_actor_cluster_numbers(cluster_count: int) -> list[int]:
+  if cluster_count <= 0:
+    return []
+
+  with transaction.atomic():
+    sequence, _ = ActivityIdSequence.objects.select_for_update().get_or_create(
+      key=AUTO_ACTOR_CLUSTER_SEQUENCE_KEY,
+      defaults={"next_cluster_number": get_max_stored_auto_actor_cluster_number() + 1},
+    )
+    next_cluster_number = max(sequence.next_cluster_number, get_max_stored_auto_actor_cluster_number() + 1)
+    allocated_cluster_numbers = list(range(next_cluster_number, next_cluster_number + cluster_count))
+
+    sequence.next_cluster_number = next_cluster_number + cluster_count
+    sequence.save(update_fields=["next_cluster_number", "updated_at"])
+
+  return allocated_cluster_numbers
+
+
+def assign_auto_actor_ids(records: list[ActivityRecord]) -> None:
+  parsed_actor_ids = [parse_auto_actor_id(record.actor_id) for record in records]
+  submitted_cluster_numbers = []
+
+  for parsed_actor_id in parsed_actor_ids:
+    if parsed_actor_id is None:
+      continue
+
+    cluster_number, _ = parsed_actor_id
+    if cluster_number not in submitted_cluster_numbers:
+      submitted_cluster_numbers.append(cluster_number)
+
+  if not submitted_cluster_numbers:
+    return
+
+  allocated_cluster_numbers = allocate_auto_actor_cluster_numbers(len(submitted_cluster_numbers))
+  cluster_number_map = dict(zip(submitted_cluster_numbers, allocated_cluster_numbers))
+
+  for record, parsed_actor_id in zip(records, parsed_actor_ids):
+    if parsed_actor_id is None:
+      continue
+
+    submitted_cluster_number, person_number = parsed_actor_id
+    record.actor_id = build_auto_actor_id(cluster_number_map[submitted_cluster_number], person_number)
 
 
 def build_record_from_payload(
