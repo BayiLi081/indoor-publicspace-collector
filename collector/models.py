@@ -4,6 +4,13 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
+FLOWING_ALLOWED_AGE_GROUPS = {
+  "<10 years old",
+  "10-20 years old",
+  "20-60 years old",
+  ">60 years old",
+}
+
 
 class ActivityRecord(models.Model):
   id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -230,6 +237,85 @@ class SiteObservation(models.Model):
     observation_label = self.observation_type.title()
     location_label = "/".join(part for part in [self.building_id, self.floor_id] if part) or "unassigned"
     return f"{observation_label} observation @ {location_label} ({self.observation_time.isoformat()})"
+
+
+class FlowingLineRecord(models.Model):
+  id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+  created_at = models.DateTimeField(auto_now_add=True)
+  building_id = models.CharField(max_length=128, db_index=True)
+  floor_id = models.CharField(max_length=128, db_index=True)
+  line_geometry = models.JSONField()
+  direction_duration_seconds = models.PositiveSmallIntegerField(default=300)
+  started_at = models.DateTimeField(db_index=True, default=timezone.now)
+  completed_at = models.DateTimeField(null=True, blank=True)
+  notes = models.TextField(blank=True)
+
+  class Meta:
+    ordering = ["-started_at", "-created_at"]
+
+  def clean(self) -> None:
+    if not isinstance(self.line_geometry, dict):
+      raise ValidationError({"line_geometry": ["Line geometry must be an object."]})
+
+    for endpoint in ("start", "end"):
+      point = self.line_geometry.get(endpoint)
+      if not isinstance(point, dict):
+        raise ValidationError({"line_geometry": [f"Line geometry must include {endpoint} point."]})
+
+      for coordinate in ("xPct", "yPct"):
+        value = point.get(coordinate)
+        if not isinstance(value, (int, float)) or not 0 <= value <= 100:
+          raise ValidationError({"line_geometry": [f"{endpoint}.{coordinate} must be between 0 and 100."]})
+
+    if self.direction_duration_seconds < 1:
+      raise ValidationError({"direction_duration_seconds": ["Duration must be at least 1 second."]})
+
+  def __str__(self) -> str:
+    return f"Flowing line {self.id} @ {self.building_id}/{self.floor_id} ({self.started_at.isoformat()})"
+
+
+class FlowingLineCount(models.Model):
+  DIRECTION_CHOICES = (
+    ("ab", "A to B"),
+    ("ba", "B to A"),
+  )
+  GENDER_CHOICES = (
+    ("male", "Male"),
+    ("female", "Female"),
+  )
+
+  id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+  flowing_line = models.ForeignKey(
+    FlowingLineRecord,
+    on_delete=models.CASCADE,
+    related_name="counts",
+  )
+  direction = models.CharField(max_length=2, choices=DIRECTION_CHOICES, db_index=True)
+  age_group = models.CharField(max_length=32, db_index=True)
+  gender = models.CharField(max_length=16, choices=GENDER_CHOICES, db_index=True)
+  count = models.PositiveIntegerField(default=0)
+
+  class Meta:
+    ordering = ["direction", "age_group", "gender"]
+    constraints = [
+      models.UniqueConstraint(
+        fields=["flowing_line", "direction", "age_group", "gender"],
+        name="unique_flowing_count_demographic",
+      )
+    ]
+
+  def clean(self) -> None:
+    if self.direction not in {"ab", "ba"}:
+      raise ValidationError({"direction": ["Direction must be 'ab' or 'ba'."]})
+
+    if self.gender not in {"male", "female"}:
+      raise ValidationError({"gender": ["Gender must be 'male' or 'female'."]})
+
+    if self.age_group not in FLOWING_ALLOWED_AGE_GROUPS:
+      raise ValidationError({"age_group": ["Age group is invalid."]})
+
+  def __str__(self) -> str:
+    return f"{self.flowing_line_id} {self.direction} {self.age_group}/{self.gender}: {self.count}"
 
 
 class Building(models.Model):

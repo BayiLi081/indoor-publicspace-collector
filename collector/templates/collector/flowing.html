@@ -1,0 +1,100 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flowing People Counter</title>
+  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260505-1">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-row">
+      <div>
+        <h1>Flowing People Counter</h1>
+        <p>Draw a crossline on the map, then count crossings by gender and age group for each direction.</p>
+      </div>
+      <nav class="topnav" aria-label="Primary">
+        <a href="{% url 'index' %}"{% if active_page == 'capture' %} class="active"{% endif %}>Capture</a>
+        <a href="{% url 'flowing' %}"{% if active_page == 'flowing' %} class="active"{% endif %}>Flowing</a>
+        <a href="{% url 'management' %}"{% if active_page == 'management' %} class="active"{% endif %}>Management</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="flowing-layout">
+    <section class="map-panel flowing-map-panel">
+      <div class="panel-head">
+        <div class="map-controls">
+          <label for="buildingSelect">Building</label>
+          <select id="buildingSelect" aria-label="Select building"></select>
+
+          <label for="floorSelect">Floor</label>
+          <select id="floorSelect" aria-label="Select floor"></select>
+        </div>
+        <div class="panel-actions">
+          <div class="zoom-controls" role="group" aria-label="Map zoom controls">
+            <button id="zoomOutBtn" type="button" class="secondary zoom-btn" aria-label="Zoom out">-</button>
+            <span id="zoomValue" class="zoom-value">100%</span>
+            <button id="zoomInBtn" type="button" class="secondary zoom-btn" aria-label="Zoom in">+</button>
+            <button id="zoomResetBtn" type="button" class="secondary zoom-btn">Fit</button>
+          </div>
+          <button id="clearLineBtn" type="button" class="secondary">Clear Line</button>
+        </div>
+      </div>
+
+      <div class="map-wrap flowing-map-wrap" id="mapWrap">
+        <div class="map-canvas" id="mapCanvas">
+          <img id="mapImage" alt="Indoor map">
+          <svg id="flowingOverlay" class="flowing-overlay" aria-hidden="true"></svg>
+        </div>
+        <div id="flowingMapEmptyState" class="map-empty-state">Select a map, then drag anywhere on it to draw the crossline.</div>
+      </div>
+      <p id="flowingStatus" class="collect-status" data-state="muted" role="status" aria-live="polite"></p>
+    </section>
+
+    <aside class="flowing-panel">
+      <section class="flowing-session-panel">
+        <div class="flowing-session-head">
+          <div>
+            <h2 id="flowingDirectionLabel">A -> B</h2>
+            <p id="flowingDirectionHint">Draw a crossline before starting.</p>
+          </div>
+          <div id="flowingTimer" class="flowing-timer">05:00</div>
+        </div>
+
+        <div class="flowing-actions">
+          <button id="startFlowingBtn" type="button">Start</button>
+          <button id="resetFlowingBtn" type="button" class="secondary">Reset</button>
+        </div>
+      </section>
+
+      <section class="flowing-count-panel">
+        <div class="records-head flowing-count-head">
+          <div>
+            <h2>Count Matrix</h2>
+            <p id="flowingCountSummary" class="records-summary">Current direction total: 0</p>
+          </div>
+        </div>
+        <div id="flowingMatrix" class="flowing-matrix" role="group" aria-label="Crossing count matrix"></div>
+      </section>
+
+      <section class="flowing-summary-panel">
+        <h2>Direction Totals</h2>
+        <div class="flowing-direction-totals">
+          <div>
+            <span>A -> B</span>
+            <strong id="totalAB">0</strong>
+          </div>
+          <div>
+            <span>B -> A</span>
+            <strong id="totalBA">0</strong>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <script type="module" src="{% static 'collector/flowing.js' %}?v=20260505-1"></script>
+</body>
+</html>

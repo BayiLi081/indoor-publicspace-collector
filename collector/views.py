@@ -38,7 +38,15 @@ from .management_auth import (
   management_access_required,
   validate_management_access_code,
 )
-from .models import ActivityIdSequence, ActivityRecord, LargeGroupRecord, PersonQuestionnaireResponse, SiteObservation
+from .models import (
+  ActivityIdSequence,
+  ActivityRecord,
+  FlowingLineCount,
+  FlowingLineRecord,
+  LargeGroupRecord,
+  PersonQuestionnaireResponse,
+  SiteObservation,
+)
 from .object_storage import build_image_object_url, delete_image_object, save_uploaded_image_object
 
 ROOT_BUILDING_ID = "__root__"
@@ -89,6 +97,18 @@ ALLOWED_LARGE_GROUP_AGE_COMPOSITIONS = {
 ALLOWED_LARGE_GROUP_SIZE_BANDS = {"9-20 people", "20-50 people", "50-100 people", "more than 100 people"}
 ALLOWED_ETHNIC_GROUPS = {"Chinese", "Malay", "Indian", "Others"}
 ALLOWED_FACIAL_EXPRESSIONS = {"happy", "no_expression", "unhappy"}
+ALLOWED_FLOWING_DIRECTIONS = {"ab", "ba"}
+FLOWING_AGE_GROUP_VALUES = ("<10 years old", "10-20 years old", "20-60 years old", ">60 years old")
+FLOWING_AGE_GROUP_ALIASES = {
+  "under-10": "<10 years old",
+  "<10 years old": "<10 years old",
+  "10-20": "10-20 years old",
+  "10-20 years old": "10-20 years old",
+  "20-60": "20-60 years old",
+  "20-60 years old": "20-60 years old",
+  "over-60": ">60 years old",
+  ">60 years old": ">60 years old",
+}
 FACIAL_EXPRESSION_ALIASES = {
   "happy": "happy",
   "smiling": "happy",
@@ -113,6 +133,11 @@ MAX_REMOTE_IMAGE_BYTES = 40 * 1024 * 1024
 @ensure_csrf_cookie
 def index(request: HttpRequest) -> HttpResponse:
   return render(request, "collector/index.html", build_page_context("capture"))
+
+
+@ensure_csrf_cookie
+def flowing(request: HttpRequest) -> HttpResponse:
+  return render(request, "collector/flowing.html", build_page_context("flowing"))
 
 
 @ensure_csrf_cookie
@@ -404,6 +429,48 @@ def api_records_next_cluster(request: HttpRequest) -> JsonResponse:
       "firstActorId": build_auto_actor_id(next_cluster_number, 1),
     }
   )
+
+
+@require_http_methods(["GET", "POST"])
+def api_flowing_records(request: HttpRequest) -> JsonResponse:
+  if request.method == "GET":
+    denial_response = get_management_access_denial_response(request)
+    if denial_response is not None:
+      return denial_response
+
+    try:
+      query = FlowingLineRecord.objects.prefetch_related("counts").all()
+      building_id = request.GET.get("building_id", "").strip()
+      floor_id = request.GET.get("floor_id", "").strip()
+
+      if building_id:
+        query = query.filter(building_id=building_id)
+      if floor_id:
+        query = query.filter(floor_id=floor_id)
+
+      return JsonResponse({"flowingRecords": [serialize_flowing_line_record(record) for record in query]})
+    except DatabaseError as exc:
+      return database_error_response(exc)
+
+  payload, error_response = parse_json_request(request)
+  if error_response:
+    return error_response
+
+  try:
+    flowing_record, count_records = build_flowing_line_record_from_payload(payload)
+    with transaction.atomic():
+      flowing_record.full_clean()
+      flowing_record.save()
+      for count_record in count_records:
+        count_record.flowing_line = flowing_record
+        count_record.full_clean()
+      FlowingLineCount.objects.bulk_create(count_records)
+  except DatabaseError as exc:
+    return database_error_response(exc)
+  except ValidationError as exc:
+    return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
+
+  return JsonResponse({"flowingRecord": serialize_flowing_line_record(flowing_record)}, status=201)
 
 
 @require_http_methods(["GET", "POST"])
@@ -909,6 +976,31 @@ def build_site_observation_from_payload(
   )
 
 
+def build_flowing_line_record_from_payload(payload: dict[str, Any]) -> tuple[FlowingLineRecord, list[FlowingLineCount]]:
+  building_id = require_non_empty_string(payload, "buildingId")
+  floor_id = require_non_empty_string(payload, "floorId")
+  line_geometry = parse_flowing_line_geometry(payload.get("lineGeometry"))
+  direction_duration_seconds = parse_positive_integer(
+    payload.get("directionDurationSeconds", 300),
+    "directionDurationSeconds",
+  )
+  started_at = parse_optional_datetime(payload.get("startedAt"), "startedAt")
+  completed_at = parse_optional_datetime(payload.get("completedAt"), "completedAt")
+  notes = optional_string(payload.get("notes"))
+  count_records = parse_flowing_counts(payload.get("counts"))
+
+  flowing_record = FlowingLineRecord(
+    building_id=building_id,
+    floor_id=floor_id,
+    line_geometry=line_geometry,
+    direction_duration_seconds=direction_duration_seconds,
+    started_at=started_at,
+    completed_at=completed_at,
+    notes=notes,
+  )
+  return flowing_record, count_records
+
+
 def require_non_empty_string(payload: dict[str, Any], key: str) -> str:
   value = payload.get(key)
   if isinstance(value, str) and value.strip():
@@ -1205,6 +1297,108 @@ def parse_location(value: Any) -> tuple[Decimal | None, Decimal | None]:
   return parse_decimal(x_value, "location.xPct"), parse_decimal(y_value, "location.yPct")
 
 
+def parse_flowing_line_geometry(value: Any) -> dict[str, Any]:
+  if not isinstance(value, dict):
+    raise ValidationError({"lineGeometry": ["Line geometry is required."]})
+
+  return {
+    "start": parse_flowing_line_point(value.get("start"), "lineGeometry.start"),
+    "end": parse_flowing_line_point(value.get("end"), "lineGeometry.end"),
+  }
+
+
+def parse_flowing_line_point(value: Any, key: str) -> dict[str, float]:
+  if not isinstance(value, dict):
+    raise ValidationError({key: ["Line point must be an object."]})
+
+  x_pct = parse_percent_float(value.get("xPct"), f"{key}.xPct")
+  y_pct = parse_percent_float(value.get("yPct"), f"{key}.yPct")
+  return {"xPct": x_pct, "yPct": y_pct}
+
+
+def parse_percent_float(value: Any, key: str) -> float:
+  parsed = parse_decimal(value, key)
+  if parsed < 0 or parsed > 100:
+    raise ValidationError({key: ["Must be between 0 and 100."]})
+  return float(parsed)
+
+
+def parse_positive_integer(value: Any, key: str) -> int:
+  try:
+    parsed = int(value)
+  except (TypeError, ValueError):
+    raise ValidationError({key: ["Must be a positive integer."]})
+
+  if parsed < 1:
+    raise ValidationError({key: ["Must be a positive integer."]})
+  return parsed
+
+
+def parse_flowing_counts(value: Any) -> list[FlowingLineCount]:
+  if not isinstance(value, dict):
+    raise ValidationError({"counts": ["Counts must be an object keyed by direction."]})
+
+  count_records = []
+  errors = {}
+
+  for direction in ("ab", "ba"):
+    direction_counts = value.get(direction)
+    if not isinstance(direction_counts, dict):
+      errors[f"counts.{direction}"] = ["Counts for this direction are required."]
+      continue
+
+    for age_group in FLOWING_AGE_GROUP_VALUES:
+      age_key = next(
+        (candidate_key for candidate_key, candidate_value in FLOWING_AGE_GROUP_ALIASES.items()
+         if candidate_value == age_group and candidate_key in direction_counts),
+        "",
+      )
+      age_counts = direction_counts.get(age_key) if age_key else None
+
+      if not isinstance(age_counts, dict):
+        errors[f"counts.{direction}.{age_group}"] = ["Age-group counts must be an object."]
+        continue
+
+      for gender in ("male", "female"):
+        try:
+          count_value = parse_non_negative_integer(age_counts.get(gender, 0), f"counts.{direction}.{age_group}.{gender}")
+        except ValidationError as exc:
+          if hasattr(exc, "message_dict"):
+            errors.update(exc.message_dict)
+          else:
+            errors[f"counts.{direction}.{age_key}.{gender}"] = exc.messages
+          continue
+
+        count_records.append(
+          FlowingLineCount(
+            direction=direction,
+            age_group=age_group,
+            gender=gender,
+            count=count_value,
+          )
+        )
+
+  if errors:
+    raise ValidationError(errors)
+
+  expected_count_records = len(ALLOWED_FLOWING_DIRECTIONS) * len(ALLOWED_AGE_GROUPS) * len(ALLOWED_GENDERS)
+  if len(count_records) != expected_count_records:
+    raise ValidationError({"counts": ["Counts must include every direction, age group, and gender."]})
+
+  return count_records
+
+
+def parse_non_negative_integer(value: Any, key: str) -> int:
+  try:
+    parsed = int(value)
+  except (TypeError, ValueError):
+    raise ValidationError({key: ["Must be a non-negative integer."]})
+
+  if parsed < 0:
+    raise ValidationError({key: ["Must be a non-negative integer."]})
+  return parsed
+
+
 def parse_photo_location(value: Any) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
   if value is None:
     return None, None, None
@@ -1347,6 +1541,33 @@ def serialize_large_group_record(record: LargeGroupRecord) -> dict[str, Any]:
     "photoUrl": build_image_object_url(record.photo_object_name),
     "photoPreview": record.photo_preview_data_url or None,
     "photoLocation": photo_location,
+  }
+
+
+def serialize_flowing_line_record(record: FlowingLineRecord) -> dict[str, Any]:
+  counts = {
+    "ab": {age_group: {"male": 0, "female": 0} for age_group in FLOWING_AGE_GROUP_VALUES},
+    "ba": {age_group: {"male": 0, "female": 0} for age_group in FLOWING_AGE_GROUP_VALUES},
+  }
+
+  for count_record in record.counts.all():
+    if count_record.direction not in counts:
+      continue
+    if count_record.age_group not in counts[count_record.direction]:
+      counts[count_record.direction][count_record.age_group] = {"male": 0, "female": 0}
+    counts[count_record.direction][count_record.age_group][count_record.gender] = count_record.count
+
+  return {
+    "id": str(record.id),
+    "createdAt": isoformat_utc(record.created_at),
+    "buildingId": record.building_id,
+    "floorId": record.floor_id,
+    "lineGeometry": record.line_geometry,
+    "directionDurationSeconds": record.direction_duration_seconds,
+    "startedAt": isoformat_utc(record.started_at),
+    "completedAt": isoformat_utc(record.completed_at),
+    "notes": record.notes,
+    "counts": counts,
   }
 
 

@@ -4,6 +4,7 @@ from . import views
 
 urlpatterns = [
   path("", views.index, name="index"),
+  path("flowing/", views.flowing, name="flowing"),
   path("management/login/", views.management_login, name="management_login"),
   path("management/logout/", views.management_logout, name="management_logout"),
   path("management/", views.management, name="management"),
@@ -13,6 +14,7 @@ urlpatterns = [
   path("api/locate-via-gps/", views.api_locate_via_gps, name="api_locate_via_gps"),
   path("api/records/", views.api_records, name="api_records"),
   path("api/records/next-cluster/", views.api_records_next_cluster, name="api_records_next_cluster"),
+  path("api/flowing-records/", views.api_flowing_records, name="api_flowing_records"),
   path("api/site-observations/", views.api_site_observations, name="api_site_observations"),
   path(
     "api/person-questionnaire-responses/",
