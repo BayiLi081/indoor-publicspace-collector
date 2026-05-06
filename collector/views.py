@@ -14,6 +14,7 @@ from django.db import DatabaseError, transaction
 from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.dateparse import parse_datetime
@@ -32,10 +33,14 @@ from .building_catalog import discover_building_maps as discover_building_maps_c
 from .floorplan_svg import convert_jpg_floorplan_to_svg, should_regenerate_jpg_wrapper
 from .locate_via_gps import GPSMappingError, get_floor_heading_offset, locate_map_point_from_gps
 from .management_auth import (
+  CAPTURE_ACCESS_SESSION_KEY,
+  clear_capture_access,
   clear_management_access,
   get_management_access_denial_response,
+  grant_capture_access,
   grant_management_access,
   management_access_required,
+  validate_capture_access_code,
   validate_management_access_code,
 )
 from .models import (
@@ -142,6 +147,53 @@ def flowing(request: HttpRequest) -> HttpResponse:
 
 @ensure_csrf_cookie
 @require_http_methods(["GET", "POST"])
+def capture_login(request: HttpRequest) -> HttpResponse:
+  if not settings.CAPTURE_ACCESS_ENABLED:
+    return redirect("index")
+
+  if not settings.CAPTURE_ACCESS_CODE:
+    return render(
+      request,
+      "collector/capture_login.html",
+      {
+        "next_path": "/",
+        "error_message": "Capture access code is not configured.",
+      },
+      status=503,
+    )
+
+  next_path = get_safe_redirect_target(request, default_path="/", expected_route_name="capture_login")
+  if request.session.get(CAPTURE_ACCESS_SESSION_KEY):
+    return redirect(next_path)
+
+  error_message = ""
+  if request.method == "POST":
+    submitted_code = request.POST.get("access_code", "")
+    if validate_capture_access_code(submitted_code):
+      grant_capture_access(request)
+      return redirect(next_path)
+
+    error_message = "Incorrect access code."
+
+  return render(
+    request,
+    "collector/capture_login.html",
+    {
+      "next_path": next_path,
+      "error_message": error_message,
+    },
+    status=403 if error_message else 200,
+  )
+
+
+@require_http_methods(["POST"])
+def capture_logout(request: HttpRequest) -> HttpResponse:
+  clear_capture_access(request)
+  return redirect("capture_login")
+
+
+@ensure_csrf_cookie
+@require_http_methods(["GET", "POST"])
 def management_login(request: HttpRequest) -> HttpResponse:
   if not settings.MANAGEMENT_ACCESS_ENABLED:
     return redirect("management")
@@ -158,7 +210,7 @@ def management_login(request: HttpRequest) -> HttpResponse:
       status=503,
     )
 
-  next_path = get_safe_management_redirect_target(request)
+  next_path = get_safe_redirect_target(request, default_path="/management/", expected_route_name="management_login")
   if request.session.get("management_access_granted"):
     return redirect(next_path)
 
@@ -677,11 +729,14 @@ def build_page_context(active_page: str) -> dict[str, Any]:
   }
 
 
-def get_safe_management_redirect_target(request: HttpRequest) -> str:
+def get_safe_redirect_target(request: HttpRequest, *, default_path: str, expected_route_name: str) -> str:
   candidate = request.POST.get("next") or request.GET.get("next") or ""
   if candidate and url_has_allowed_host_and_scheme(candidate, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+    expected_path = reverse(expected_route_name)
+    if candidate.startswith(expected_path):
+      return default_path
     return candidate
-  return "/management/"
+  return default_path
 
 def parse_request_payload(request: HttpRequest) -> tuple[dict[str, Any], Any | None, JsonResponse | None]:
   content_type = (request.content_type or "").lower()

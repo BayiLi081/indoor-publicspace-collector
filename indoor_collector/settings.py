@@ -101,6 +101,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
   "django.middleware.security.SecurityMiddleware",
   "django.contrib.sessions.middleware.SessionMiddleware",
+  "collector.management_auth.SiteAccessCodeMiddleware",
   "django.middleware.common.CommonMiddleware",
   "django.middleware.csrf.CsrfViewMiddleware",
   "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -209,6 +210,9 @@ AZURE_URL_EXPIRATION_SECS = env_optional_int("AZURE_URL_EXPIRATION_SECS")
 MANAGEMENT_ACCESS_ENABLED = env_bool("DJANGO_MANAGEMENT_ACCESS_ENABLED", False)
 MANAGEMENT_ACCESS_CODE = env_str("DJANGO_MANAGEMENT_ACCESS_CODE", "")
 MANAGEMENT_ACCESS_SESSION_AGE_SECS = env_int("DJANGO_MANAGEMENT_ACCESS_SESSION_AGE_SECS", 4 * 60 * 60)
+CAPTURE_ACCESS_ENABLED = env_bool("DJANGO_CAPTURE_ACCESS_ENABLED", False)
+CAPTURE_ACCESS_CODE = env_str("DJANGO_CAPTURE_ACCESS_CODE", "")
+CAPTURE_ACCESS_SESSION_AGE_SECS = env_int("DJANGO_CAPTURE_ACCESS_SESSION_AGE_SECS", 4 * 60 * 60)
 DEFAULT_STORAGE_OPTIONS = {}
 if OBJECT_STORAGE_BACKEND == "django.core.files.storage.FileSystemStorage":
   DEFAULT_STORAGE_OPTIONS = {
@@ -298,5 +302,7 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 SESSION_COOKIE_SECURE = env_bool("DJANGO_SESSION_COOKIE_SECURE", not DEBUG)
 CSRF_COOKIE_SECURE = env_bool("DJANGO_CSRF_COOKIE_SECURE", not DEBUG)
+# Panorama preview is rendered in an iframe hosted on the same app origin.
+X_FRAME_OPTIONS = env_str("DJANGO_X_FRAME_OPTIONS", "SAMEORIGIN")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
