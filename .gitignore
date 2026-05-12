@@ -60,11 +60,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# since there is scripts to transform .jpg to .svg, we can ignore .jpg files
-*.jpg
-media/*.png
-
-/assets/*
-!/assets/.gitkeep
-!/assets/buildings.manifest.example.json
-!/assets/SUTD/*
+# Ignore asset payloads by default. Only survey definition JSON files under
+# assets/ and its subfolders should be picked up by git.
+/assets/**
+!/assets/**/
+!/assets/**/intercept-survey.json

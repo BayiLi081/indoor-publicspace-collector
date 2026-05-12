@@ -1,0 +1,47 @@
+{
+  "hubId": "OurTampinesHub",
+  "hubLabel": "OTH",
+  "comparativeCaseLabel": "Tampines West CC",
+  "questions": [
+    {
+      "key": "visitedComparativeCase",
+      "question": "Have you also visited Tampines West CC for activities?",
+      "choices": [
+        { "value": "yes", "label": "Yes" },
+        { "value": "no", "label": "No" }
+      ]
+    },
+    {
+      "key": "comparativeVisitFrequency",
+      "question": "Which place do you visit more often for activities?",
+      "choices": [
+        { "value": "hub_more_often", "label": "OTH more often" },
+        { "value": "comparative_more_often", "label": "Tampines West CC more often" },
+        { "value": "about_the_same", "label": "About the same" },
+        { "value": "not_applicable", "label": "Not applicable / have not visited Tampines West CC" }
+      ]
+    },
+    {
+      "key": "promotesGroupActivities",
+      "question": "Which place better promotes group activities?",
+      "choices": [
+        { "value": "hub", "label": "OTH" },
+        { "value": "comparative", "label": "Tampines West CC" },
+        { "value": "both", "label": "Both equally" },
+        { "value": "neither", "label": "Neither" },
+        { "value": "not_sure", "label": "Not sure" }
+      ]
+    },
+    {
+      "key": "preferredForSociospatialCapital",
+      "question": "Which place would you prefer for meeting neighbours, joining activities, and feeling more connected to the neighbourhood?",
+      "choices": [
+        { "value": "hub", "label": "OTH" },
+        { "value": "comparative", "label": "Tampines West CC" },
+        { "value": "both", "label": "Both equally" },
+        { "value": "neither", "label": "Neither" },
+        { "value": "not_sure", "label": "Not sure" }
+      ]
+    }
+  ]
+}
