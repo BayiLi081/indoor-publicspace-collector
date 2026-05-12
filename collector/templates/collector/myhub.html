@@ -1,0 +1,107 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MyHub Concept Planner</title>
+  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260512-7">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-row">
+      <div>
+        <h1>MyHub</h1>
+      </div>
+      <nav class="topnav" aria-label="Primary">
+        <a href="{% url 'index' %}"{% if active_page == 'capture' %} class="active"{% endif %}>Capture</a>
+        <a href="{% url 'flowing' %}"{% if active_page == 'flowing' %} class="active"{% endif %}>Flowing</a>
+        <a href="{% url 'myhub' %}"{% if active_page == 'myhub' %} class="active"{% endif %}>MyHub</a>
+        <a href="{% url 'management' %}"{% if active_page == 'management' %} class="active"{% endif %}>Management</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="myhub-layout">
+    <section class="map-panel myhub-map-panel">
+      <div class="panel-head">
+        <div class="map-controls">
+          <select id="buildingSelect" aria-label="Select building">
+            <option value="" selected>Building</option>
+          </select>
+
+          <select id="floorSelect" aria-label="Select floor">
+            <option value="" selected>Floor</option>
+          </select>
+        </div>
+        <div class="panel-actions">
+          <div class="zoom-controls" role="group" aria-label="Map zoom controls">
+            <button id="zoomOutBtn" type="button" class="secondary zoom-btn" aria-label="Zoom out">-</button>
+            <span id="zoomValue" class="zoom-value">100%</span>
+            <button id="zoomInBtn" type="button" class="secondary zoom-btn" aria-label="Zoom in">+</button>
+            <button id="zoomResetBtn" type="button" class="secondary zoom-btn">Fit</button>
+          </div>
+          <div class="locate-controls">
+            <div class="locate-button-row" role="group" aria-label="Map location tools">
+              <button id="locateViaGpsBtn" type="button" class="secondary">Locate via GPS</button>
+              <button id="locateViaPoiBtn" type="button" class="secondary" aria-pressed="false">Locate via POI</button>
+              <button id="locateViaPicBtn" type="button" class="secondary" aria-pressed="false">Locate via Pic</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="map-wrap myhub-map-wrap" id="mapWrap">
+        <div class="map-canvas" id="mapCanvas">
+          <img id="mapImage" alt="Indoor map">
+          <div id="myhubPinLayer" class="myhub-pin-layer" aria-label="Placed MyHub ideas"></div>
+        </div>
+        <div id="myhubMapEmptyState" class="map-empty-state">Select a map, choose a category, then tap the floor plan.</div>
+      </div>
+      <p id="myhubStatus" class="collect-status" data-state="muted" role="status" aria-live="polite"></p>
+    </section>
+
+    <aside class="myhub-panel">
+      <section class="myhub-tool-panel">
+        <h2>Place Ideas</h2>
+        <div id="myhubCategoryPalette" class="myhub-category-palette" role="group" aria-label="MyHub categories"></div>
+      </section>
+
+      <section class="myhub-tool-panel">
+        <div class="records-head">
+          <div>
+            <h2>Placed Items</h2>
+            <p id="myhubItemSummary" class="records-summary">0 items</p>
+          </div>
+        </div>
+        <div id="myhubItemList" class="myhub-item-list"></div>
+        <div class="actions myhub-actions">
+          <button id="clearMyhubBtn" type="button" class="secondary">Clear</button>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <div id="picPreviewModal" class="modal-shell" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-pic-preview-close></div>
+    <div class="modal-card pic-preview-modal-card" role="dialog" aria-modal="true" aria-labelledby="picPreviewModalTitle">
+      <div class="modal-head">
+        <div>
+          <h3 id="picPreviewModalTitle">Locate Via Pic Preview</h3>
+          <p id="picPreviewModalCoords" class="modal-subtitle">Map point</p>
+        </div>
+        <button type="button" class="secondary" data-pic-preview-close>Close</button>
+      </div>
+      <iframe
+        id="picPreviewFrame"
+        title="Panorama preview"
+        loading="lazy"
+        referrerpolicy="no-referrer"
+        allow="fullscreen"
+      ></iframe>
+    </div>
+  </div>
+
+  <script type="module" src="{% static 'collector/myhub.js' %}?v=20260512-4"></script>
+</body>
+</html>

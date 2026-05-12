@@ -13,6 +13,11 @@ const PIC_VIEWER_TEMPLATE_URL = "/static/collector/panorama-viewer.html";
 const DEFAULT_LOCATE_STATUS_MESSAGE =
   "Use Locate via GPS for your approximate spot, Locate via POI to show named places, or Locate via Pic to preview linked images.";
 const DEFAULT_OBSERVATION_STATUS_MESSAGE = "Site Observations";
+const HUB_INTERCEPT_SURVEY_ASSET_PATHS = {
+  "One-Punggol": "One-Punggol/intercept-survey.json",
+  OurTampinesHub: "OTH/intercept-survey.json",
+  OTH: "OTH/intercept-survey.json",
+};
 const OBSERVATION_MODAL_MODE_NOTE = "note";
 const OBSERVATION_MODAL_MODE_QUESTIONS = "questions";
 const OBSERVATION_QUESTIONS = [
@@ -22,6 +27,13 @@ const OBSERVATION_QUESTIONS = [
   { key: "cleanliness", label: "Cleanliness" },
 ];
 const PERSON_QUESTIONNAIRE_QUESTIONS = [
+  {
+    key: "postcode",
+    type: "text",
+    question: "What is your home postcode?",
+    placeholder: "6-digit postcode",
+    inputMode: "numeric",
+  },
   {
     key: "mainPurpose",
     question: "What is your main purpose for being here today?",
@@ -71,6 +83,14 @@ const PERSON_QUESTIONNAIRE_QUESTIONS = [
       { value: "moderately", label: "Moderately" },
       { value: "yes", label: "Yes" },
       { value: "definitely", label: "Definitely" },
+    ],
+  },
+  {
+    key: "wantsToMapHub",
+    question: "Do you want to map the hub as you like?",
+    choices: [
+      { value: "yes", label: "Yes" },
+      { value: "no", label: "No" },
     ],
   },
 ];
@@ -261,6 +281,8 @@ const poiMapsCache = new Map();
 const poiLoadPromises = new Map();
 const photoMapsCache = new Map();
 const photoLoadPromises = new Map();
+const hubInterceptSurveyCache = new Map();
+const hubInterceptSurveyLoadPromises = new Map();
 const GROUP_ACTIVITY_TYPOLOGY_OPTIONS = groupActivityTypologyButtons.length
   ? groupActivityTypologyButtons
       .map((button) => button.dataset.groupActivityTypology || "")
@@ -321,6 +343,7 @@ let questionnaireSelectedRecordIds = [];
 let questionnaireSelectionStep = "select";
 let questionnaireQuestionIndex = 0;
 let questionnaireResponses = {};
+let currentPersonQuestionnaireQuestions = PERSON_QUESTIONNAIRE_QUESTIONS;
 let isSavingPersonQuestionnaire = false;
 let largeGroupMode = null;
 
@@ -2735,7 +2758,7 @@ function renderPersonQuestionnaireSelection() {
     personQuestionnaireSelectBody.innerHTML = `
       <div class="person-questionnaire-confirm-summary">
         <strong>${selectedRecords.length} selected</strong>
-        <p>The five-question response will be linked to this person ID.</p>
+        <p>The questionnaire response will be linked to this person ID.</p>
       </div>
       <div class="person-questionnaire-candidate-list">
         ${selectedRecords.map((record) => renderPersonQuestionnaireCandidate(record, { readOnly: true })).join("")}
@@ -2829,7 +2852,7 @@ function getSelectedQuestionnaireCandidateRecords() {
   return questionnaireSelectionCandidates.filter((record) => selectedIds.has(record.id));
 }
 
-function onPersonQuestionnaireSelectSubmit(event) {
+async function onPersonQuestionnaireSelectSubmit(event) {
   event.preventDefault();
 
   if (questionnaireSelectionStep !== "confirm") {
@@ -2854,8 +2877,9 @@ function onPersonQuestionnaireSelectSubmit(event) {
   }
 
   const selectedRecordIds = selectedRecords.slice(0, 1).map((record) => record.id);
+  setPersonQuestionnaireSelectPrompt("Loading questionnaire...", "muted");
   closePersonQuestionnaireSelectModal();
-  openPersonQuestionnaireModal(selectedRecordIds);
+  await openPersonQuestionnaireModal(selectedRecordIds);
 }
 
 function onPersonQuestionnaireSelectBack() {
@@ -2880,7 +2904,7 @@ function onPersonQuestionnaireSelectModalClick(event) {
   }
 }
 
-function openPersonQuestionnaireModal(recordIds) {
+async function openPersonQuestionnaireModal(recordIds) {
   if (!personQuestionnaireModal || !personQuestionnaireForm) {
     return;
   }
@@ -2888,12 +2912,13 @@ function openPersonQuestionnaireModal(recordIds) {
   questionnaireSelectedRecordIds = [...recordIds];
   questionnaireQuestionIndex = 0;
   questionnaireResponses = {};
+  currentPersonQuestionnaireQuestions = await buildPersonQuestionnaireQuestions(recordIds);
   setPersonQuestionnairePrompt("", "muted");
   renderPersonQuestionnaireQuestion();
   personQuestionnaireModal.hidden = false;
   personQuestionnaireModal.setAttribute("aria-hidden", "false");
   syncModalOpenState();
-  personQuestionnaireOptions?.querySelector("button")?.focus();
+  focusCurrentPersonQuestionnaireInput();
 }
 
 function closePersonQuestionnaireModal({ requireConfirm = false } = {}) {
@@ -2910,6 +2935,7 @@ function closePersonQuestionnaireModal({ requireConfirm = false } = {}) {
   personQuestionnaireModal.setAttribute("aria-hidden", "true");
   questionnaireQuestionIndex = 0;
   questionnaireResponses = {};
+  currentPersonQuestionnaireQuestions = PERSON_QUESTIONNAIRE_QUESTIONS;
   setPersonQuestionnairePrompt("", "muted");
   syncModalOpenState();
 }
@@ -2919,7 +2945,7 @@ function renderPersonQuestionnaireQuestion() {
     return;
   }
 
-  const question = PERSON_QUESTIONNAIRE_QUESTIONS[questionnaireQuestionIndex];
+  const question = currentPersonQuestionnaireQuestions[questionnaireQuestionIndex];
   if (!question) {
     return;
   }
@@ -2929,32 +2955,52 @@ function renderPersonQuestionnaireQuestion() {
     personQuestionnaireSubtitle.textContent = formatSelectedQuestionnairePeople(selectedRecords);
   }
   if (personQuestionnaireProgress) {
-    personQuestionnaireProgress.textContent = `Question ${questionnaireQuestionIndex + 1} of ${PERSON_QUESTIONNAIRE_QUESTIONS.length}`;
+    personQuestionnaireProgress.textContent = `Question ${questionnaireQuestionIndex + 1} of ${currentPersonQuestionnaireQuestions.length}`;
   }
   personQuestionnaireQuestionText.textContent = question.question;
-  personQuestionnaireOptions.innerHTML = question.choices
-    .map((choice) => {
-      const isSelected = String(questionnaireResponses[question.key] || "") === choice.value;
-      return `
-        <button type="button" class="person-questionnaire-option" data-person-questionnaire-value="${escapeHtml(choice.value)}" aria-pressed="${isSelected ? "true" : "false"}">
-          <span class="person-questionnaire-box" aria-hidden="true"></span>
-          <span>${escapeHtml(choice.label)}</span>
-        </button>
-      `;
-    })
-    .join("");
-
-  personQuestionnaireOptions.querySelectorAll("[data-person-questionnaire-value]").forEach((button) => {
-    button.addEventListener("click", () => {
-      setPersonQuestionnaireResponse(question.key, button.dataset.personQuestionnaireValue || "");
+  if (question.type === "text") {
+    personQuestionnaireOptions.innerHTML = `
+      <label class="person-questionnaire-text-option">
+        <input
+          id="personQuestionnaireTextInput"
+          type="text"
+          value="${escapeHtml(questionnaireResponses[question.key] || "")}"
+          placeholder="${escapeHtml(question.placeholder || "")}"
+          inputmode="${escapeHtml(question.inputMode || "text")}"
+          autocomplete="postal-code"
+        >
+      </label>
+    `;
+    const textInput = personQuestionnaireOptions.querySelector("#personQuestionnaireTextInput");
+    textInput?.addEventListener("input", () => {
+      questionnaireResponses[question.key] = textInput.value.trim();
+      setPersonQuestionnairePrompt("", "muted");
     });
-  });
+  } else {
+    personQuestionnaireOptions.innerHTML = question.choices
+      .map((choice) => {
+        const isSelected = String(questionnaireResponses[question.key] || "") === choice.value;
+        return `
+          <button type="button" class="person-questionnaire-option" data-person-questionnaire-value="${escapeHtml(choice.value)}" aria-pressed="${isSelected ? "true" : "false"}">
+            <span class="person-questionnaire-box" aria-hidden="true"></span>
+            <span>${escapeHtml(choice.label)}</span>
+          </button>
+        `;
+      })
+      .join("");
+
+    personQuestionnaireOptions.querySelectorAll("[data-person-questionnaire-value]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setPersonQuestionnaireResponse(question.key, button.dataset.personQuestionnaireValue || "");
+      });
+    });
+  }
 
   if (personQuestionnairePrevBtn) {
     personQuestionnairePrevBtn.disabled = questionnaireQuestionIndex === 0 || isSavingPersonQuestionnaire;
   }
   if (personQuestionnaireNextBtn) {
-    const isLastQuestion = questionnaireQuestionIndex === PERSON_QUESTIONNAIRE_QUESTIONS.length - 1;
+    const isLastQuestion = questionnaireQuestionIndex === currentPersonQuestionnaireQuestions.length - 1;
     personQuestionnaireNextBtn.textContent = isLastQuestion ? "Submit ->" : "->";
     personQuestionnaireNextBtn.disabled = isSavingPersonQuestionnaire;
   }
@@ -2969,8 +3015,8 @@ function formatSelectedQuestionnairePeople(selectedRecords) {
 }
 
 function setPersonQuestionnaireResponse(questionKey, value) {
-  const question = PERSON_QUESTIONNAIRE_QUESTIONS.find((candidate) => candidate.key === questionKey);
-  if (!question || !question.choices.some((choice) => choice.value === value)) {
+  const question = currentPersonQuestionnaireQuestions.find((candidate) => candidate.key === questionKey);
+  if (!question || question.type === "text" || !question.choices.some((choice) => choice.value === value)) {
     return;
   }
 
@@ -3015,27 +3061,45 @@ async function onPersonQuestionnaireFormSubmit(event) {
     return;
   }
 
-  const question = PERSON_QUESTIONNAIRE_QUESTIONS[questionnaireQuestionIndex];
-  if (!questionnaireResponses[question.key]) {
-    setPersonQuestionnairePrompt("Choose one answer before continuing.", "error");
+  const question = currentPersonQuestionnaireQuestions[questionnaireQuestionIndex];
+  const validationMessage = validatePersonQuestionnaireAnswer(question);
+  if (validationMessage) {
+    setPersonQuestionnairePrompt(validationMessage, "error");
     return;
   }
 
-  if (questionnaireQuestionIndex < PERSON_QUESTIONNAIRE_QUESTIONS.length - 1) {
-    questionnaireQuestionIndex += 1;
+  const nextQuestionIndex = getNextPersonQuestionnaireQuestionIndex(questionnaireQuestionIndex);
+  if (nextQuestionIndex >= 0) {
+    questionnaireQuestionIndex = nextQuestionIndex;
     renderPersonQuestionnaireQuestion();
     setPersonQuestionnairePrompt("", "muted");
-    personQuestionnaireOptions?.querySelector("button")?.focus();
+    focusCurrentPersonQuestionnaireInput();
     return;
   }
 
   await savePersonQuestionnaireResponses();
 }
 
+function validatePersonQuestionnaireAnswer(question) {
+  const value = String(questionnaireResponses[question.key] || "").trim();
+  if (!value) {
+    return question.type === "text" ? "Enter an answer before continuing." : "Choose one answer before continuing.";
+  }
+  if (question.key === "postcode" && !/^\d{6}$/.test(value.replace(/\s+/g, ""))) {
+    return "Enter a 6-digit postcode.";
+  }
+  return "";
+}
+
+function focusCurrentPersonQuestionnaireInput() {
+  personQuestionnaireOptions?.querySelector("input, button")?.focus();
+}
+
 async function savePersonQuestionnaireResponses() {
-  const missingQuestion = PERSON_QUESTIONNAIRE_QUESTIONS.find((question) => !questionnaireResponses[question.key]);
+  const requiredQuestions = getRequiredPersonQuestionnaireQuestions();
+  const missingQuestion = requiredQuestions.find((question) => !questionnaireResponses[question.key]);
   if (missingQuestion) {
-    setPersonQuestionnairePrompt("Answer all five questions before submitting.", "error");
+    setPersonQuestionnairePrompt("Answer all questions before submitting.", "error");
     return;
   }
 
@@ -3050,9 +3114,16 @@ async function savePersonQuestionnaireResponses() {
   setObservationStatus("Saving person questionnaire responses...", "muted");
 
   try {
+    const hubSpecificResponses = {};
+    requiredQuestions
+      .filter((question) => !PERSON_QUESTIONNAIRE_QUESTIONS.some((baseQuestion) => baseQuestion.key === question.key))
+      .forEach((question) => {
+        hubSpecificResponses[question.key] = questionnaireResponses[question.key];
+      });
     const responsePayload = {
       ...questionnaireResponses,
       overallRating: Number.parseInt(questionnaireResponses.overallRating, 10),
+      hubSpecificResponses,
     };
     const response = await apiRequest(API_PERSON_QUESTIONNAIRE_RESPONSES, {
       method: "POST",
@@ -3072,6 +3143,15 @@ async function savePersonQuestionnaireResponses() {
     const successMessage = `Questionnaire saved for ${savedCount} ${savedCount === 1 ? "person" : "people"}.`;
     setPersonQuestionnairePrompt(successMessage, "success");
     setObservationStatus(successMessage, "success");
+    const savedResponse = Array.isArray(data.responses) ? data.responses[0] : null;
+    if (questionnaireResponses.wantsToMapHub === "yes") {
+      const selectedRecord = records.find((record) => record.id === selectedRecordIds[0]);
+      const postcode = String(questionnaireResponses.postcode || "").replace(/\s+/g, "");
+      if (window.confirm(`Confirm respondent postcode: ${postcode}\n\nProceed to MyHub mapping for this person?`)) {
+        window.location.href = buildMyHubQuestionnaireUrl(selectedRecord, savedResponse, postcode);
+        return;
+      }
+    }
     closePersonQuestionnaireModal();
   } catch (error) {
     const errorMessage = `Could not save questionnaire: ${error.message}`;
@@ -3081,6 +3161,53 @@ async function savePersonQuestionnaireResponses() {
   } finally {
     setPersonQuestionnaireActionState(false);
   }
+}
+
+function buildMyHubQuestionnaireUrl(record, savedResponse, postcode) {
+  const params = new URLSearchParams();
+  const buildingId = getRecordBuildingId(record) || currentBuildingId;
+  const floorId = getRecordFloorId(record, buildingId) || currentFloorId;
+  if (buildingId) {
+    params.set("buildingId", buildingId);
+  }
+  if (floorId) {
+    params.set("floorId", floorId);
+  }
+  if (record?.id) {
+    params.set("recordId", record.id);
+  }
+  if (record?.actorId) {
+    params.set("actorId", record.actorId);
+  }
+  if (savedResponse?.id) {
+    params.set("questionnaireResponseId", savedResponse.id);
+  }
+  if (postcode) {
+    params.set("postcode", postcode);
+  }
+  return `/myhub/?${params.toString()}`;
+}
+
+function getRequiredPersonQuestionnaireQuestions() {
+  if (questionnaireResponses.visitedComparativeCase === "no") {
+    return currentPersonQuestionnaireQuestions.filter(
+      (question) =>
+        PERSON_QUESTIONNAIRE_QUESTIONS.some((baseQuestion) => baseQuestion.key === question.key) ||
+        question.key === "visitedComparativeCase"
+    );
+  }
+
+  return currentPersonQuestionnaireQuestions;
+}
+
+function getNextPersonQuestionnaireQuestionIndex(currentIndex) {
+  const requiredQuestions = getRequiredPersonQuestionnaireQuestions();
+  for (let index = currentIndex + 1; index < currentPersonQuestionnaireQuestions.length; index += 1) {
+    if (requiredQuestions.includes(currentPersonQuestionnaireQuestions[index])) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function setPersonQuestionnaireActionState(busy) {
@@ -5007,17 +5134,156 @@ async function loadPhotoMapsForBuilding(buildingId) {
   return loadPromise;
 }
 
-async function fetchPhotoAssetJson(photoAssetUrl) {
+async function buildPersonQuestionnaireQuestions(recordIds) {
+  const selectedRecords = records.filter((record) => recordIds.includes(record.id));
+  const buildingId = getRecordBuildingId(selectedRecords[0]);
+  if (!buildingId) {
+    return PERSON_QUESTIONNAIRE_QUESTIONS;
+  }
+
   try {
-    return await fetch(photoAssetUrl, {
+    const hubQuestions = await loadHubInterceptSurveyQuestions(buildingId);
+    if (!hubQuestions.length) {
+      return PERSON_QUESTIONNAIRE_QUESTIONS;
+    }
+    const finalQuestion = PERSON_QUESTIONNAIRE_QUESTIONS.find((question) => question.key === "wantsToMapHub");
+    const baseQuestions = PERSON_QUESTIONNAIRE_QUESTIONS.filter((question) => question.key !== "wantsToMapHub");
+    return finalQuestion ? [...baseQuestions, ...hubQuestions, finalQuestion] : [...baseQuestions, ...hubQuestions];
+  } catch (error) {
+    console.error(error);
+    setObservationStatus(`Using base questionnaire: ${error.message}`, "warn");
+    return PERSON_QUESTIONNAIRE_QUESTIONS;
+  }
+}
+
+async function loadHubInterceptSurveyQuestions(buildingId) {
+  if (!buildingId) {
+    return [];
+  }
+
+  if (hubInterceptSurveyCache.has(buildingId)) {
+    return hubInterceptSurveyCache.get(buildingId) || [];
+  }
+
+  if (hubInterceptSurveyLoadPromises.has(buildingId)) {
+    return hubInterceptSurveyLoadPromises.get(buildingId);
+  }
+
+  const loadPromise = (async () => {
+    const surveyAssetUrls = getHubInterceptSurveyAssetUrls(buildingId);
+    if (!surveyAssetUrls.length) {
+      hubInterceptSurveyCache.set(buildingId, []);
+      return [];
+    }
+
+    let response = null;
+    let lastError = null;
+    for (let index = 0; index < surveyAssetUrls.length; index += 1) {
+      const surveyAssetUrl = surveyAssetUrls[index];
+      try {
+        response = await fetchAssetJson(surveyAssetUrl);
+      } catch (error) {
+        lastError = error;
+        response = null;
+      }
+
+      const hasFallbackUrl = index < surveyAssetUrls.length - 1;
+      if (response?.ok || !hasFallbackUrl) {
+        break;
+      }
+    }
+
+    if (!response?.ok) {
+      if (lastError) {
+        throw lastError;
+      }
+      throw new Error(`Could not load intercept survey for ${getBuildingLabel(buildingId)}.`);
+    }
+
+    const payload = await response.json().catch(() => {
+      throw new Error(`Intercept survey for ${getBuildingLabel(buildingId)} is not valid JSON.`);
+    });
+    const questions = normalizeHubInterceptSurveyQuestions(payload);
+    hubInterceptSurveyCache.set(buildingId, questions);
+    return questions;
+  })().finally(() => {
+    hubInterceptSurveyLoadPromises.delete(buildingId);
+  });
+
+  hubInterceptSurveyLoadPromises.set(buildingId, loadPromise);
+  return loadPromise;
+}
+
+function getHubInterceptSurveyAssetUrls(buildingId) {
+  const building = buildingMaps[buildingId];
+  if (building && typeof building.interceptSurveySrc === "string" && building.interceptSurveySrc.trim()) {
+    return [building.interceptSurveySrc.trim()];
+  }
+
+  const configuredPath = HUB_INTERCEPT_SURVEY_ASSET_PATHS[buildingId];
+  if (!configuredPath) {
+    return [];
+  }
+
+  const remoteOrConfiguredUrl = buildAssetUrl(configuredPath);
+  const localAssetUrl = `/assets/${encodeAssetPath(configuredPath)}`;
+  return [...new Set([remoteOrConfiguredUrl, localAssetUrl])];
+}
+
+function normalizeHubInterceptSurveyQuestions(payload) {
+  const rawQuestions = Array.isArray(payload?.questions) ? payload.questions : [];
+  const baseQuestionKeys = new Set(PERSON_QUESTIONNAIRE_QUESTIONS.map((question) => question.key));
+  const seenQuestionKeys = new Set();
+
+  return rawQuestions
+    .map((rawQuestion) => normalizeHubInterceptSurveyQuestion(rawQuestion))
+    .filter((question) => {
+      if (!question || baseQuestionKeys.has(question.key) || seenQuestionKeys.has(question.key)) {
+        return false;
+      }
+      seenQuestionKeys.add(question.key);
+      return true;
+    });
+}
+
+function normalizeHubInterceptSurveyQuestion(rawQuestion) {
+  if (!rawQuestion || typeof rawQuestion !== "object" || Array.isArray(rawQuestion)) {
+    return null;
+  }
+
+  const key = String(rawQuestion.key || "").trim();
+  const question = String(rawQuestion.question || "").trim();
+  const choices = Array.isArray(rawQuestion.choices)
+    ? rawQuestion.choices
+        .map((choice) => ({
+          value: String(choice?.value || "").trim(),
+          label: String(choice?.label || "").trim(),
+        }))
+        .filter((choice) => choice.value && choice.label)
+    : [];
+
+  if (!key || !question || choices.length < 2) {
+    return null;
+  }
+
+  return { key, question, choices };
+}
+
+async function fetchPhotoAssetJson(photoAssetUrl) {
+  return fetchAssetJson(photoAssetUrl);
+}
+
+async function fetchAssetJson(assetUrl) {
+  try {
+    return await fetch(assetUrl, {
       headers: { Accept: "application/json" },
     });
   } catch (error) {
-    if (!isAbsoluteHttpUrl(photoAssetUrl)) {
+    if (!isAbsoluteHttpUrl(assetUrl)) {
       throw error;
     }
 
-    const proxyUrl = `${API_ASSET_JSON}?url=${encodeURIComponent(photoAssetUrl)}`;
+    const proxyUrl = `${API_ASSET_JSON}?url=${encodeURIComponent(assetUrl)}`;
     return fetch(proxyUrl, {
       credentials: "same-origin",
       headers: { Accept: "application/json" },

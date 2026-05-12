@@ -4,7 +4,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import ActivityRecord, LargeGroupRecord
+from .models import ActivityRecord, LargeGroupRecord, MyHubConceptPin
 
 
 @override_settings(MANAGEMENT_ACCESS_ENABLED=True, MANAGEMENT_ACCESS_CODE="test-code")
@@ -110,3 +110,27 @@ class AutoActorIdTests(TestCase):
 
     self.assertEqual(data["record"]["actorId"], "manual-person-1")
     self.assertEqual(self.client.get(reverse("api_records_next_cluster")).json()["nextClusterNumber"], 1)
+
+
+class MyHubPinIpCaptureTests(TestCase):
+  def test_myhub_pin_saves_remote_addr_as_device_ip(self):
+    payload = {
+      "buildingId": "SUTD",
+      "buildingLabel": "SUTD",
+      "floorId": "main-buildings",
+      "floorLabel": "Floor 3",
+      "categoryKey": "tables",
+      "location": {"xPct": 60.5, "yPct": 30.25},
+    }
+
+    response = self.client.post(
+      reverse("api_myhub_pins"),
+      data=json.dumps(payload),
+      content_type="application/json",
+      REMOTE_ADDR="203.0.113.7",
+    )
+
+    self.assertEqual(response.status_code, 201, response.content)
+    pin = MyHubConceptPin.objects.get()
+    self.assertEqual(pin.device_ip, "203.0.113.7")
+    self.assertEqual(response.json()["pin"]["deviceIp"], "203.0.113.7")

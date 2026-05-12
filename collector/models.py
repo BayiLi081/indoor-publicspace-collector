@@ -151,11 +151,14 @@ class PersonQuestionnaireResponse(models.Model):
   )
   actor_id = models.CharField(max_length=128, blank=True, db_index=True)
   questionnaire_time = models.DateTimeField(db_index=True, default=timezone.now)
+  postcode = models.CharField(max_length=16, blank=True, default="", db_index=True)
   main_purpose = models.CharField(max_length=64, choices=MAIN_PURPOSE_CHOICES)
   visit_frequency = models.CharField(max_length=64, choices=VISIT_FREQUENCY_CHOICES)
   stay_duration = models.CharField(max_length=64, choices=STAY_DURATION_CHOICES)
   overall_rating = models.PositiveSmallIntegerField()
   social_interaction = models.CharField(max_length=64, choices=SOCIAL_INTERACTION_CHOICES)
+  wants_to_map_hub = models.BooleanField(default=False)
+  hub_specific_responses = models.JSONField(default=dict, blank=True)
 
   class Meta:
     ordering = ["-questionnaire_time", "-created_at"]
@@ -316,6 +319,76 @@ class FlowingLineCount(models.Model):
 
   def __str__(self) -> str:
     return f"{self.flowing_line_id} {self.direction} {self.age_group}/{self.gender}: {self.count}"
+
+
+class MyHubConceptPin(models.Model):
+  CATEGORY_CHOICES = (
+    ("tables", "Tables"),
+    ("benches", "Benches"),
+    ("soft_seating_corners", "Soft seating corners"),
+    ("courtyards", "Courtyards"),
+    ("atriums", "Atriums"),
+    ("activity_rooms", "Activity rooms"),
+    ("childrens_play_areas", "Children's play areas"),
+    ("reading_corners", "Reading corners"),
+    ("planting_areas", "Planting areas"),
+    ("event_spaces", "Event spaces"),
+    ("exercise_areas", "Exercise areas"),
+    ("makerspaces", "Makerspaces"),
+  )
+
+  id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+  created_at = models.DateTimeField(auto_now_add=True)
+  building_id = models.CharField(max_length=128, db_index=True)
+  building_label = models.CharField(max_length=255, blank=True, default="")
+  floor_id = models.CharField(max_length=128, db_index=True)
+  floor_label = models.CharField(max_length=255, blank=True, default="")
+  activity_record = models.ForeignKey(
+    ActivityRecord,
+    on_delete=models.SET_NULL,
+    related_name="myhub_concept_pins",
+    null=True,
+    blank=True,
+  )
+  questionnaire_response = models.ForeignKey(
+    PersonQuestionnaireResponse,
+    on_delete=models.SET_NULL,
+    related_name="myhub_concept_pins",
+    null=True,
+    blank=True,
+  )
+  actor_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
+  respondent_postcode = models.CharField(max_length=16, blank=True, default="", db_index=True)
+  category_key = models.CharField(max_length=64, choices=CATEGORY_CHOICES, db_index=True)
+  category_label = models.CharField(max_length=128)
+  category_color = models.CharField(max_length=16)
+  device_ip = models.GenericIPAddressField(blank=True, null=True, db_index=True)
+  location_x_pct = models.DecimalField(max_digits=6, decimal_places=2)
+  location_y_pct = models.DecimalField(max_digits=6, decimal_places=2)
+
+  class Meta:
+    ordering = ["-created_at"]
+    indexes = [
+      models.Index(fields=["building_id", "floor_id", "category_key"]),
+    ]
+
+  def clean(self) -> None:
+    for field_name in ("location_x_pct", "location_y_pct"):
+      value = getattr(self, field_name)
+      if value is None or value < 0 or value > 100:
+        raise ValidationError({field_name: ["Location percentage must be between 0 and 100."]})
+
+    if not is_hex_color(self.category_color):
+      raise ValidationError({"category_color": ["Category color must be a hex color."]})
+
+  def __str__(self) -> str:
+    return f"{self.category_label} @ {self.building_id}/{self.floor_id}"
+
+
+def is_hex_color(value: str) -> bool:
+  if not isinstance(value, str) or len(value) not in (4, 7) or not value.startswith("#"):
+    return False
+  return all(char in "0123456789abcdefABCDEF" for char in value[1:])
 
 
 class Building(models.Model):

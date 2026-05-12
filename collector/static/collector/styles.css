@@ -1511,6 +1511,20 @@ button.activity-extra-btn[aria-pressed="true"] {
   box-shadow: inset 0 0 0 3px #fff;
 }
 
+.person-questionnaire-text-option {
+  display: block;
+}
+
+.person-questionnaire-text-option input {
+  width: 100%;
+  min-height: 2.8rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+}
+
 .person-questionnaire-navigation {
   justify-content: space-between;
 }
@@ -2287,8 +2301,291 @@ th {
   }
 }
 
+.myhub-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(20rem, 24rem);
+  gap: 1rem;
+  padding: 1rem;
+  align-items: start;
+}
+
+.myhub-map-panel {
+  min-width: 0;
+}
+
+.myhub-map-wrap {
+  min-height: min(68vh, 760px);
+}
+
+.myhub-pin-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.myhub-pin {
+  position: absolute;
+  width: 1.75rem;
+  height: 1.75rem;
+  transform: translate(-50%, -100%);
+  border: 2px solid #fff;
+  border-radius: 999px 999px 999px 0;
+  background: var(--pin-color);
+  color: #fff;
+  box-shadow: 0 0.35rem 0.8rem rgb(15 23 42 / 0.25);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: auto;
+  rotate: -45deg;
+}
+
+.myhub-pin span {
+  rotate: 45deg;
+}
+
+.myhub-pin:hover {
+  transform: translate(-50%, -100%) scale(1.08);
+}
+
+.myhub-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.myhub-tool-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 1rem;
+}
+
+.myhub-tool-panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.myhub-category-palette {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+}
+
+.myhub-category-button {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  justify-content: flex-start;
+  min-height: 2.35rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  font-weight: 650;
+  text-align: left;
+}
+
+.myhub-category-button[aria-pressed="true"] {
+  border-color: var(--category-color);
+  box-shadow: inset 0 0 0 1px var(--category-color);
+  background: color-mix(in srgb, var(--category-color) 10%, #fff);
+}
+
+.myhub-color-dot {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--category-color);
+}
+
+.myhub-item-list {
+  display: grid;
+  gap: 0.55rem;
+  max-height: min(42vh, 32rem);
+  overflow: auto;
+}
+
+.myhub-empty-list {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.myhub-item-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.myhub-item-row strong,
+.myhub-item-row span {
+  display: block;
+}
+
+.myhub-item-row span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.myhub-item-index {
+  width: 1.45rem;
+  height: 1.45rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--pin-color);
+  color: #fff !important;
+  font-weight: 800;
+}
+
+.myhub-remove-btn {
+  min-height: 2rem;
+  padding: 0.25rem 0.55rem;
+}
+
+.myhub-actions {
+  margin-top: 0.85rem;
+}
+
+@media (max-width: 980px) {
+  .myhub-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .myhub-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .myhub-category-palette {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .myhub-layout {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0;
+  }
+
+  .myhub-layout > .myhub-map-panel {
+    display: contents;
+    overflow: visible;
+  }
+
+  .myhub-map-panel .panel-head {
+    position: static;
+    align-items: stretch;
+    gap: 0.6rem;
+    margin: 0 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  }
+
+  .myhub-map-panel .panel-actions,
+  .myhub-map-panel .map-controls {
+    width: 100%;
+  }
+
+  .myhub-map-panel .map-controls select {
+    min-width: 0;
+  }
+
+  .myhub-map-wrap {
+    position: sticky;
+    top: 0;
+    z-index: 18;
+    align-self: start;
+    height: min(30vh, 19rem);
+    height: min(30svh, 19rem);
+    min-height: 0;
+    overflow: auto;
+    margin: 0 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    box-shadow: 0 14px 32px rgba(15, 23, 42, 0.12);
+  }
+
+  .myhub-panel {
+    position: static;
+    grid-template-columns: 1fr;
+    gap: 0.7rem;
+    max-height: none;
+    overflow: visible;
+    padding: 0 0.7rem 0.8rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .myhub-panel .myhub-tool-panel:first-child {
+    position: sticky;
+    top: calc(min(30svh, 19rem) + 0.75rem);
+    z-index: 17;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
+  }
+
+  .myhub-tool-panel {
+    padding: 0.8rem;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 10px;
+  }
+
+  .myhub-tool-panel h2 {
+    margin-bottom: 0.45rem;
+    font-size: 0.95rem;
+  }
+
+  .myhub-category-palette {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+    max-height: min(30dvh, 14rem);
+    overflow: auto;
+    padding-right: 0.1rem;
+  }
+
+  .myhub-category-button {
+    min-height: 2.15rem;
+    max-width: none;
+    white-space: normal;
+    font-size: 0.88rem;
+  }
+
+  .myhub-item-list {
+    max-height: min(34dvh, 15.5rem);
+  }
+
+  .myhub-actions {
+    margin-top: 0.55rem;
+  }
+}
+
 @media (max-width: 420px) {
   .activity-type-controls {
     grid-template-columns: 1fr;
+  }
+
+  .myhub-item-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .myhub-remove-btn {
+    grid-column: 1 / -1;
   }
 }

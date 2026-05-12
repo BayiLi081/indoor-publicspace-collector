@@ -5,6 +5,7 @@ from . import views
 urlpatterns = [
   path("", views.index, name="index"),
   path("flowing/", views.flowing, name="flowing"),
+  path("myhub/", views.myhub, name="myhub"),
   path("capture/login/", views.capture_login, name="capture_login"),
   path("capture/logout/", views.capture_logout, name="capture_logout"),
   path("management/login/", views.management_login, name="management_login"),
@@ -17,6 +18,7 @@ urlpatterns = [
   path("api/records/", views.api_records, name="api_records"),
   path("api/records/next-cluster/", views.api_records_next_cluster, name="api_records_next_cluster"),
   path("api/flowing-records/", views.api_flowing_records, name="api_flowing_records"),
+  path("api/myhub-pins/", views.api_myhub_pins, name="api_myhub_pins"),
   path("api/site-observations/", views.api_site_observations, name="api_site_observations"),
   path(
     "api/person-questionnaire-responses/",

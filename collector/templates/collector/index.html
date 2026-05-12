@@ -16,6 +16,7 @@
       <nav class="topnav" aria-label="Primary">
         <a href="{% url 'index' %}"{% if active_page == 'capture' %} class="active"{% endif %}>Capture</a>
         <a href="{% url 'flowing' %}"{% if active_page == 'flowing' %} class="active"{% endif %}>Flowing</a>
+        <a href="{% url 'myhub' %}"{% if active_page == 'myhub' %} class="active"{% endif %}>MyHub</a>
         <a href="{% url 'management' %}"{% if active_page == 'management' %} class="active"{% endif %}>Management</a>
       </nav>
     </div>
@@ -88,9 +89,6 @@
               <button id="locateViaPoiBtn" type="button" class="secondary" aria-pressed="false">Locate via POI</button>
               <button id="locateViaPicBtn" type="button" class="secondary" aria-pressed="false">Locate via Pic</button>
             </div>
-            <small id="locateStatus" class="locate-status" data-state="muted" role="status" aria-live="polite">
-              Use Locate via GPS for your approximate spot, Locate via POI to show named places, or Locate via Pic to preview linked images.
-            </small>
           </div>
         </div>
       </div>
@@ -507,7 +505,7 @@
         </div>
 
         <div class="person-questionnaire-progress">
-          <span id="personQuestionnaireProgress">Question 1 of 5</span>
+          <span id="personQuestionnaireProgress">Question 1</span>
         </div>
 
         <fieldset class="person-questionnaire-question">
@@ -585,6 +583,6 @@
   </div>
 
   {{ activity_catalog|json_script:"activityCatalogData" }}
-  <script type="module" src="{% static 'collector/app.js' %}?v=20260506-3"></script>
+  <script type="module" src="{% static 'collector/app.js' %}?v=20260512-4"></script>
 </body>
 </html>

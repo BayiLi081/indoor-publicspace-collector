@@ -17,6 +17,7 @@
       <nav class="topnav" aria-label="Primary">
         <a href="{% url 'index' %}"{% if active_page == 'capture' %} class="active"{% endif %}>Capture</a>
         <a href="{% url 'flowing' %}"{% if active_page == 'flowing' %} class="active"{% endif %}>Flowing</a>
+        <a href="{% url 'myhub' %}"{% if active_page == 'myhub' %} class="active"{% endif %}>MyHub</a>
         <a href="{% url 'management' %}"{% if active_page == 'management' %} class="active"{% endif %}>Management</a>
         <form method="post" action="{% url 'management_logout' %}" class="topnav-logout">
           {% csrf_token %}

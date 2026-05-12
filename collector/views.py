@@ -1,4 +1,5 @@
 import json
+import ipaddress
 import re
 from urllib import error as urlerror
 from urllib import request as urlrequest
@@ -49,6 +50,7 @@ from .models import (
   FlowingLineCount,
   FlowingLineRecord,
   LargeGroupRecord,
+  MyHubConceptPin,
   PersonQuestionnaireResponse,
   SiteObservation,
 )
@@ -72,6 +74,30 @@ PERSON_QUESTIONNAIRE_RESPONSE_FIELDS = (
   ("stayDuration", "stay_duration"),
   ("socialInteraction", "social_interaction"),
 )
+PERSON_QUESTIONNAIRE_BOOLEAN_FIELDS = (
+  ("wantsToMapHub", "wants_to_map_hub"),
+)
+PERSON_QUESTIONNAIRE_HUB_RESPONSE_FIELDS = {
+  "visitedComparativeCase",
+  "comparativeVisitFrequency",
+  "promotesGroupActivities",
+  "preferredForSociospatialCapital",
+}
+MYHUB_CATEGORY_LABELS = dict(MyHubConceptPin.CATEGORY_CHOICES)
+MYHUB_CATEGORY_COLORS = {
+  "tables": "#2563eb",
+  "benches": "#0f766e",
+  "soft_seating_corners": "#db2777",
+  "courtyards": "#65a30d",
+  "atriums": "#7c3aed",
+  "activity_rooms": "#ea580c",
+  "childrens_play_areas": "#0891b2",
+  "reading_corners": "#4f46e5",
+  "planting_areas": "#16a34a",
+  "event_spaces": "#dc2626",
+  "exercise_areas": "#ca8a04",
+  "makerspaces": "#9333ea",
+}
 PERSON_QUESTIONNAIRE_ALLOWED_CHOICES = {
   "mainPurpose": {choice[0] for choice in PersonQuestionnaireResponse.MAIN_PURPOSE_CHOICES},
   "visitFrequency": {choice[0] for choice in PersonQuestionnaireResponse.VISIT_FREQUENCY_CHOICES},
@@ -143,6 +169,11 @@ def index(request: HttpRequest) -> HttpResponse:
 @ensure_csrf_cookie
 def flowing(request: HttpRequest) -> HttpResponse:
   return render(request, "collector/flowing.html", build_page_context("flowing"))
+
+
+@ensure_csrf_cookie
+def myhub(request: HttpRequest) -> HttpResponse:
+  return render(request, "collector/myhub.html", build_page_context("myhub"))
 
 
 @ensure_csrf_cookie
@@ -525,6 +556,82 @@ def api_flowing_records(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
 
   return JsonResponse({"flowingRecord": serialize_flowing_line_record(flowing_record)}, status=201)
+
+
+@require_http_methods(["GET", "POST", "DELETE"])
+def api_myhub_pins(request: HttpRequest) -> JsonResponse:
+  if request.method == "GET":
+    try:
+      query = MyHubConceptPin.objects.all()
+      building_id = request.GET.get("building_id", "").strip()
+      floor_id = request.GET.get("floor_id", "").strip()
+      record_id = request.GET.get("record_id", "").strip()
+      questionnaire_response_id = request.GET.get("questionnaire_response_id", "").strip()
+
+      if building_id:
+        query = query.filter(building_id=building_id)
+      if floor_id:
+        query = query.filter(floor_id=floor_id)
+      if record_id:
+        try:
+          query = query.filter(activity_record_id=UUID(record_id))
+        except (TypeError, ValueError):
+          raise ValidationError({"recordId": ["Record id must be a valid UUID."]})
+      if questionnaire_response_id:
+        try:
+          query = query.filter(questionnaire_response_id=UUID(questionnaire_response_id))
+        except (TypeError, ValueError):
+          raise ValidationError({"questionnaireResponseId": ["Questionnaire response id must be a valid UUID."]})
+
+      return JsonResponse({"pins": [serialize_myhub_pin(pin) for pin in query]})
+    except DatabaseError as exc:
+      return database_error_response(exc)
+    except ValidationError as exc:
+      return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
+
+  if request.method == "DELETE":
+    try:
+      pin_id = request.GET.get("id", "").strip()
+      if pin_id:
+        try:
+          deleted_count, _ = MyHubConceptPin.objects.filter(id=UUID(pin_id)).delete()
+        except (TypeError, ValueError):
+          raise ValidationError({"id": ["Pin id must be a valid UUID."]})
+        return JsonResponse({"deleted": deleted_count})
+
+      building_id = request.GET.get("building_id", "").strip()
+      floor_id = request.GET.get("floor_id", "").strip()
+      record_id = request.GET.get("record_id", "").strip()
+      if not building_id or not floor_id:
+        raise ValidationError({"floor": ["Provide id, or both building_id and floor_id query parameters."]})
+
+      query = MyHubConceptPin.objects.filter(building_id=building_id, floor_id=floor_id)
+      if record_id:
+        try:
+          query = query.filter(activity_record_id=UUID(record_id))
+        except (TypeError, ValueError):
+          raise ValidationError({"recordId": ["Record id must be a valid UUID."]})
+      deleted_count, _ = query.delete()
+      return JsonResponse({"deleted": deleted_count})
+    except DatabaseError as exc:
+      return database_error_response(exc)
+    except ValidationError as exc:
+      return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
+
+  payload, error_response = parse_json_request(request)
+  if error_response:
+    return error_response
+
+  try:
+    pin = build_myhub_pin_from_payload(payload, device_ip=get_request_ip_address(request))
+    pin.full_clean()
+    pin.save()
+  except DatabaseError as exc:
+    return database_error_response(exc)
+  except ValidationError as exc:
+    return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
+
+  return JsonResponse({"pin": serialize_myhub_pin(pin)}, status=201)
 
 
 @require_http_methods(["GET", "POST"])
@@ -1058,6 +1165,75 @@ def build_flowing_line_record_from_payload(payload: dict[str, Any]) -> tuple[Flo
   return flowing_record, count_records
 
 
+def build_myhub_pin_from_payload(payload: dict[str, Any], *, device_ip: str | None = None) -> MyHubConceptPin:
+  building_id = require_non_empty_string(payload, "buildingId")
+  floor_id = require_non_empty_string(payload, "floorId")
+  category_key = parse_myhub_category_key(payload.get("categoryKey"))
+  location_x_pct, location_y_pct = parse_location(payload.get("location"))
+  if location_x_pct is None or location_y_pct is None:
+    raise ValidationError({"location": ["Map coordinates are required."]})
+
+  activity_record = parse_optional_activity_record(payload.get("recordId"))
+  questionnaire_response = parse_optional_questionnaire_response(payload.get("questionnaireResponseId"))
+  actor_id = optional_string(payload.get("actorId")) or (activity_record.actor_id if activity_record else "")
+  respondent_postcode = parse_postcode(payload.get("postcode"), required=False)
+
+  return MyHubConceptPin(
+    building_id=building_id,
+    building_label=optional_string(payload.get("buildingLabel")),
+    floor_id=floor_id,
+    floor_label=optional_string(payload.get("floorLabel")),
+    activity_record=activity_record,
+    questionnaire_response=questionnaire_response,
+    actor_id=actor_id,
+    respondent_postcode=respondent_postcode,
+    category_key=category_key,
+    category_label=MYHUB_CATEGORY_LABELS[category_key],
+    category_color=MYHUB_CATEGORY_COLORS[category_key],
+    device_ip=device_ip,
+    location_x_pct=location_x_pct,
+    location_y_pct=location_y_pct,
+  )
+
+
+def parse_myhub_category_key(value: Any) -> str:
+  if not isinstance(value, str):
+    raise ValidationError({"categoryKey": ["Category is required."]})
+
+  normalized = value.strip()
+  if normalized not in MYHUB_CATEGORY_LABELS:
+    raise ValidationError({"categoryKey": ["Category is invalid."]})
+  return normalized
+
+
+def parse_optional_activity_record(value: Any) -> ActivityRecord | None:
+  if not isinstance(value, str) or not value.strip():
+    return None
+  try:
+    record_id = UUID(value.strip())
+  except (TypeError, ValueError):
+    raise ValidationError({"recordId": ["Record id must be a valid UUID."]})
+
+  record = ActivityRecord.objects.filter(id=record_id).first()
+  if record is None:
+    raise ValidationError({"recordId": ["Selected person record does not exist."]})
+  return record
+
+
+def parse_optional_questionnaire_response(value: Any) -> PersonQuestionnaireResponse | None:
+  if not isinstance(value, str) or not value.strip():
+    return None
+  try:
+    response_id = UUID(value.strip())
+  except (TypeError, ValueError):
+    raise ValidationError({"questionnaireResponseId": ["Questionnaire response id must be a valid UUID."]})
+
+  response = PersonQuestionnaireResponse.objects.filter(id=response_id).first()
+  if response is None:
+    raise ValidationError({"questionnaireResponseId": ["Questionnaire response does not exist."]})
+  return response
+
+
 def require_non_empty_string(payload: dict[str, Any], key: str) -> str:
   value = payload.get(key)
   if isinstance(value, str) and value.strip():
@@ -1069,6 +1245,22 @@ def optional_string(value: Any) -> str:
   if value is None:
     return ""
   return str(value).strip()
+
+
+def get_request_ip_address(request: HttpRequest) -> str | None:
+  x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
+  forwarded_candidates = [segment.strip() for segment in x_forwarded_for.split(",") if segment.strip()]
+  remote_addr = str(request.META.get("REMOTE_ADDR", "")).strip()
+  candidates = [*forwarded_candidates, remote_addr]
+
+  for candidate in candidates:
+    try:
+      parsed_ip = ipaddress.ip_address(candidate)
+      return str(parsed_ip)
+    except ValueError:
+      continue
+
+  return None
 
 
 def parse_observation_type(value: Any) -> str:
@@ -1160,6 +1352,14 @@ def parse_person_questionnaire_responses(value: Any) -> dict[str, Any]:
   parsed_values: dict[str, Any] = {}
   errors: dict[str, list[str]] = {}
 
+  try:
+    parsed_values["postcode"] = parse_postcode(value.get("postcode"), required=True)
+  except ValidationError as exc:
+    if hasattr(exc, "message_dict"):
+      errors.update(exc.message_dict)
+    else:
+      errors["responses.postcode"] = exc.messages
+
   for payload_key, model_field in PERSON_QUESTIONNAIRE_RESPONSE_FIELDS:
     raw_value = value.get(payload_key)
     allowed_values = PERSON_QUESTIONNAIRE_ALLOWED_CHOICES[payload_key]
@@ -1183,6 +1383,52 @@ def parse_person_questionnaire_responses(value: Any) -> dict[str, Any]:
       parsed_values["overall_rating"] = parsed_rating
     except (TypeError, ValueError):
       errors["responses.overallRating"] = ["Overall rating must be between 1 and 5."]
+
+  for payload_key, model_field in PERSON_QUESTIONNAIRE_BOOLEAN_FIELDS:
+    raw_value = value.get(payload_key)
+    if raw_value not in {"yes", "no", True, False}:
+      errors[f"responses.{payload_key}"] = ["Select one of the provided options."]
+      continue
+    parsed_values[model_field] = raw_value in {"yes", True}
+
+  if errors:
+    raise ValidationError(errors)
+
+  parsed_values["hub_specific_responses"] = parse_hub_specific_questionnaire_responses(
+    value.get("hubSpecificResponses", {})
+  )
+
+  return parsed_values
+
+
+def parse_postcode(value: Any, *, required: bool) -> str:
+  if value is None or (isinstance(value, str) and not value.strip()):
+    if required:
+      raise ValidationError({"responses.postcode": ["Postcode is required."]})
+    return ""
+
+  normalized = str(value).strip().replace(" ", "")
+  if not re.fullmatch(r"\d{6}", normalized):
+    raise ValidationError({"responses.postcode": ["Enter a 6-digit postcode."]})
+  return normalized
+
+
+def parse_hub_specific_questionnaire_responses(value: Any) -> dict[str, str]:
+  if value in (None, ""):
+    return {}
+  if not isinstance(value, dict):
+    raise ValidationError({"responses.hubSpecificResponses": ["Hub-specific responses must be an object."]})
+
+  parsed_values: dict[str, str] = {}
+  errors: dict[str, list[str]] = {}
+  for key, raw_value in value.items():
+    if key not in PERSON_QUESTIONNAIRE_HUB_RESPONSE_FIELDS:
+      errors[f"responses.hubSpecificResponses.{key}"] = ["This hub-specific question is not supported."]
+      continue
+    if not isinstance(raw_value, str) or not raw_value.strip():
+      errors[f"responses.hubSpecificResponses.{key}"] = ["Select one of the provided options."]
+      continue
+    parsed_values[key] = raw_value.strip()
 
   if errors:
     raise ValidationError(errors)
@@ -1628,6 +1874,27 @@ def serialize_flowing_line_record(record: FlowingLineRecord) -> dict[str, Any]:
   }
 
 
+def serialize_myhub_pin(pin: MyHubConceptPin) -> dict[str, Any]:
+  return {
+    "id": str(pin.id),
+    "createdAt": isoformat_utc(pin.created_at),
+    "buildingId": pin.building_id,
+    "buildingLabel": pin.building_label,
+    "floorId": pin.floor_id,
+    "floorLabel": pin.floor_label,
+    "recordId": str(pin.activity_record_id) if pin.activity_record_id else None,
+    "questionnaireResponseId": str(pin.questionnaire_response_id) if pin.questionnaire_response_id else None,
+    "actorId": pin.actor_id or None,
+    "postcode": pin.respondent_postcode or None,
+    "categoryKey": pin.category_key,
+    "categoryLabel": pin.category_label,
+    "color": pin.category_color,
+    "deviceIp": pin.device_ip,
+    "xPct": float(pin.location_x_pct),
+    "yPct": float(pin.location_y_pct),
+  }
+
+
 def serialize_site_observation(observation: SiteObservation) -> dict[str, Any]:
   photo_location = None
   if observation.photo_latitude is not None and observation.photo_longitude is not None:
@@ -1674,10 +1941,13 @@ def serialize_person_questionnaire_response(response: PersonQuestionnaireRespons
     "floorId": activity_record.floor_id,
     "responses": {
       "mainPurpose": response.main_purpose,
+      "postcode": response.postcode,
       "visitFrequency": response.visit_frequency,
       "stayDuration": response.stay_duration,
       "overallRating": response.overall_rating,
       "socialInteraction": response.social_interaction,
+      "wantsToMapHub": response.wants_to_map_hub,
+      "hubSpecificResponses": response.hub_specific_responses or {},
     },
   }
 

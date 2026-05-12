@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import ActivityIdSequence, ActivityRecord, FlowingLineCount, FlowingLineRecord, PersonQuestionnaireResponse
+from .models import (
+  ActivityIdSequence,
+  ActivityRecord,
+  FlowingLineCount,
+  FlowingLineRecord,
+  MyHubConceptPin,
+  PersonQuestionnaireResponse,
+)
 
 
 @admin.register(ActivityRecord)
@@ -63,3 +70,21 @@ class FlowingLineRecordAdmin(admin.ModelAdmin):
 class ActivityIdSequenceAdmin(admin.ModelAdmin):
   list_display = ("key", "next_cluster_number", "updated_at")
   readonly_fields = ("updated_at",)
+
+
+@admin.register(MyHubConceptPin)
+class MyHubConceptPinAdmin(admin.ModelAdmin):
+  list_display = (
+    "created_at",
+    "category_label",
+    "actor_id",
+    "respondent_postcode",
+    "building_id",
+    "floor_id",
+    "device_ip",
+    "location_x_pct",
+    "location_y_pct",
+  )
+  list_filter = ("building_id", "floor_id", "category_key")
+  search_fields = ("building_id", "building_label", "floor_id", "floor_label", "category_label", "device_ip")
+  ordering = ("-created_at",)
