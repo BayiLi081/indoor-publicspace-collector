@@ -58,12 +58,17 @@ const locateViaPoiBtn = document.getElementById("locateViaPoiBtn");
 const locateViaPicBtn = document.getElementById("locateViaPicBtn");
 const categoryPalette = document.getElementById("myhubCategoryPalette");
 const itemSummary = document.getElementById("myhubItemSummary");
-const itemList = document.getElementById("myhubItemList");
-const clearBtn = document.getElementById("clearMyhubBtn");
+const barChart = document.getElementById("myhubBarChart");
 const statusEl = document.getElementById("myhubStatus");
 const picPreviewModal = document.getElementById("picPreviewModal");
 const picPreviewFrame = document.getElementById("picPreviewFrame");
 const picPreviewModalCoords = document.getElementById("picPreviewModalCoords");
+const pinUserInfoModal = document.getElementById("pinUserInfoModal");
+const pinUserInfoForm = document.getElementById("pinUserInfoForm");
+const pinHousingTypeSelect = document.getElementById("pinHousingType");
+const pinHousingTypeOtherWrap = document.getElementById("pinHousingTypeOtherWrap");
+const pinHousingTypeOtherInput = document.getElementById("pinHousingTypeOther");
+const pinUserInfoError = document.getElementById("pinUserInfoError");
 const poiMapsCache = new Map();
 const poiLoadPromises = new Map();
 const photoMapsCache = new Map();
@@ -89,6 +94,8 @@ let poiRequestToken = 0;
 let photoRequestToken = 0;
 let shouldAnimatePois = false;
 let questionnaireContext = parseQuestionnaireContext();
+let pinUserInfo = null;
+let pendingPinPoint = null;
 
 initialize();
 
@@ -102,7 +109,7 @@ async function initialize() {
 
   buildingSelect.addEventListener("change", onBuildingChange);
   floorSelect.addEventListener("change", onFloorChange);
-  mapImage.addEventListener("pointerdown", onMapPointerDown);
+  mapWrap.addEventListener("pointerdown", onMapPointerDown);
   mapWrap.addEventListener("pointermove", onMapPointerMove);
   mapWrap.addEventListener("wheel", onMapWheel, { passive: false });
   mapWrap.addEventListener("touchstart", onMapTouchStart, { passive: true });
@@ -132,8 +139,15 @@ async function initialize() {
   if (picPreviewModal) {
     picPreviewModal.addEventListener("click", onPicPreviewModalClick);
   }
-  clearBtn.addEventListener("click", clearCurrentFloorPins);
-
+  if (pinUserInfoModal) {
+    pinUserInfoModal.addEventListener("click", onPinUserInfoModalClick);
+  }
+  if (pinUserInfoForm) {
+    pinUserInfoForm.addEventListener("submit", onPinUserInfoFormSubmit);
+  }
+  if (pinHousingTypeSelect) {
+    pinHousingTypeSelect.addEventListener("change", onPinHousingTypeChange);
+  }
   setMapZoom(DEFAULT_MAP_ZOOM, { preserveCenter: false });
 
   try {
@@ -260,7 +274,7 @@ function updateMapForSelection() {
     updateMapEmptyState();
     renderPins();
     renderLocateOverlays();
-    renderItemList();
+    renderItemDistribution();
     return;
   }
 
@@ -269,7 +283,7 @@ function updateMapForSelection() {
   updateMapEmptyState();
   renderPins();
   renderLocateOverlays();
-  renderItemList();
+  renderItemDistribution();
 }
 
 function renderCategoryPalette() {
@@ -298,8 +312,129 @@ function renderCategoryPalette() {
   });
 }
 
+function requiresPinUserInfo() {
+  return !questionnaireContext.questionnaireResponseId;
+}
+
+async function collectPinUserInfo() {
+  if (!pinUserInfoModal || !pinUserInfoForm) {
+    return;
+  }
+
+  resetPinUserInfoForm();
+  pinUserInfoModal.hidden = false;
+  pinUserInfoModal.setAttribute("aria-hidden", "false");
+}
+
+function closePinUserInfoModal() {
+  if (!pinUserInfoModal || !pinUserInfoForm) {
+    return;
+  }
+
+  pinUserInfoModal.hidden = true;
+  pinUserInfoModal.setAttribute("aria-hidden", "true");
+}
+
+function resetPinUserInfoForm() {
+  if (!pinUserInfoForm) {
+    return;
+  }
+
+  pinUserInfoForm.reset();
+  if (pinUserInfoError) {
+    pinUserInfoError.hidden = true;
+    pinUserInfoError.textContent = "";
+  }
+  onPinHousingTypeChange();
+}
+
+function onPinUserInfoModalClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+  if (target.hasAttribute("data-pin-user-info-close")) {
+    pendingPinPoint = null;
+    closePinUserInfoModal();
+  }
+}
+
+function onPinHousingTypeChange() {
+  if (!pinHousingTypeSelect || !pinHousingTypeOtherWrap || !pinHousingTypeOtherInput) {
+    return;
+  }
+
+  const isOther = pinHousingTypeSelect.value === "other";
+  pinHousingTypeOtherWrap.hidden = !isOther;
+  pinHousingTypeOtherInput.required = isOther;
+  if (!isOther) {
+    pinHousingTypeOtherInput.value = "";
+  }
+}
+
+function onPinUserInfoFormSubmit(event) {
+  event.preventDefault();
+  if (!pinUserInfoForm) {
+    return;
+  }
+
+  const formData = new FormData(pinUserInfoForm);
+  const info = {
+    gender: String(formData.get("gender") || "").trim(),
+    ethnicGroup: String(formData.get("ethnicGroup") || "").trim(),
+    ageGroup: String(formData.get("ageGroup") || "").trim(),
+    housingType: String(formData.get("housingType") || "").trim(),
+    housingTypeOther: String(formData.get("housingTypeOther") || "").trim(),
+    tenureStatus: String(formData.get("tenureStatus") || "").trim(),
+  };
+
+  if (!info.gender || !info.ethnicGroup || !info.ageGroup || !info.housingType || !info.tenureStatus) {
+    showPinUserInfoError("Please answer all required fields.");
+    return;
+  }
+  if (info.housingType === "other" && !info.housingTypeOther) {
+    showPinUserInfoError("Please specify your housing type.");
+    return;
+  }
+
+  showPinUserInfoError("");
+  pinUserInfo = info;
+  closePinUserInfoModal();
+
+  if (pendingPinPoint) {
+    const point = pendingPinPoint;
+    pendingPinPoint = null;
+    void saveMyHubPin(point);
+  }
+}
+
+function showPinUserInfoError(message) {
+  if (!pinUserInfoError) {
+    return;
+  }
+  pinUserInfoError.textContent = message;
+  pinUserInfoError.hidden = !message;
+}
+
+function buildPinUserInfoPayload(info) {
+  if (!info) {
+    return null;
+  }
+  return {
+    gender: info.gender,
+    ethnicGroup: info.ethnicGroup,
+    ageGroup: info.ageGroup,
+    housingType: info.housingType,
+    housingTypeOther: info.housingType === "other" ? info.housingTypeOther : "",
+    tenureStatus: info.tenureStatus,
+  };
+}
+
 async function onMapPointerDown(event) {
   if (!mapImage.getAttribute("src") || isSavingPin) {
+    return;
+  }
+  if (isMapInteractiveOverlayTarget(event.target)) {
     return;
   }
 
@@ -309,6 +444,22 @@ async function onMapPointerDown(event) {
   }
 
   event.preventDefault();
+
+  if (requiresPinUserInfo() && !pinUserInfo) {
+    pendingPinPoint = point;
+    collectPinUserInfo();
+    setStatus("Please complete the short profile before placing a pin.", "muted");
+    return;
+  }
+
+  await saveMyHubPin(point);
+}
+
+function isMapInteractiveOverlayTarget(target) {
+  return target instanceof Element && !!target.closest(".myhub-pin, .pic-marker");
+}
+
+async function saveMyHubPin(point) {
   const category = getCategory(activeCategoryKey);
   isSavingPin = true;
   setStatus(`Saving ${category.label}...`, "muted");
@@ -326,6 +477,8 @@ async function onMapPointerDown(event) {
         actorId: questionnaireContext.actorId,
         postcode: questionnaireContext.postcode,
         questionnaireResponseId: questionnaireContext.questionnaireResponseId,
+        pinUserInfoId: pinUserInfo?.id || "",
+        pinUserInfo: pinUserInfo?.id ? null : buildPinUserInfoPayload(pinUserInfo),
         location: point,
       },
     });
@@ -335,8 +488,11 @@ async function onMapPointerDown(event) {
     }
 
     pins = [payload.pin, ...pins.filter((pin) => pin.id !== payload.pin.id)];
+    if (payload.pin?.pinUserInfoId && pinUserInfo) {
+      pinUserInfo = { ...pinUserInfo, id: payload.pin.pinUserInfoId };
+    }
     renderPins();
-    renderItemList();
+    renderItemDistribution();
     setStatus(`${category.label} placed.`, "success");
   } catch (error) {
     console.error("Could not save MyHub pin:", error);
@@ -893,95 +1049,64 @@ function getEmbeddableImageUrl(url) {
   return `${API_ASSET_JSON}?url=${encodeURIComponent(url)}`;
 }
 
-function renderItemList() {
+function renderItemDistribution() {
   const floorPins = getCurrentFloorPins();
   itemSummary.textContent = `${floorPins.length} item${floorPins.length === 1 ? "" : "s"}`;
-  clearBtn.disabled = floorPins.length === 0;
-
-  if (!floorPins.length) {
-    itemList.innerHTML = '<p class="myhub-empty-list">No items placed on this floor.</p>';
+  if (!barChart) {
     return;
   }
 
-  itemList.innerHTML = floorPins.map((pin, index) => `
-    <article class="myhub-item-row">
-      <span class="myhub-item-index" style="--pin-color: ${pin.color};">${index + 1}</span>
-      <div>
-        <strong>${escapeHtml(pin.categoryLabel)}</strong>
-        <span>${pin.xPct}%, ${pin.yPct}%</span>
+  if (!floorPins.length) {
+    barChart.innerHTML = '<p class="myhub-empty-list">No items placed on this floor.</p>';
+    return;
+  }
+
+  const categoryRows = getCurrentFloorCategoryDistribution(floorPins);
+  barChart.innerHTML = categoryRows.map((row) => `
+    <article class="myhub-bar-row">
+      <div class="myhub-bar-head">
+        <strong>${escapeHtml(row.label)}</strong>
+        <span>${row.count} (${row.percentLabel})</span>
       </div>
-      <button type="button" class="secondary myhub-remove-btn" data-myhub-remove-pin="${escapeHtml(pin.id)}">Remove</button>
+      <div class="myhub-bar-track" aria-hidden="true">
+        <span class="myhub-bar-fill" style="--bar-color: ${row.color}; width: ${row.percent.toFixed(2)}%;"></span>
+      </div>
     </article>
   `).join("");
-
-  itemList.querySelectorAll("[data-myhub-remove-pin]").forEach((button) => {
-    button.addEventListener("click", () => removePin(button.dataset.myhubRemovePin || ""));
-  });
 }
 
-async function removePin(pinId) {
-  const pin = pins.find((candidate) => candidate.id === pinId);
-  if (!pin) {
-    return;
-  }
+function getCurrentFloorCategoryDistribution(floorPins) {
+  const countsByCategory = new Map();
+  floorPins.forEach((pin) => {
+    countsByCategory.set(pin.categoryKey, (countsByCategory.get(pin.categoryKey) || 0) + 1);
+  });
 
-  setStatus("Removing item...", "muted");
-  try {
-    const response = await apiRequest(`${API_MYHUB_PINS}?id=${encodeURIComponent(pinId)}`, {
-      method: "DELETE",
+  const total = floorPins.length;
+  return Array.from(countsByCategory.entries())
+    .map(([categoryKey, count]) => {
+      const category = getCategory(categoryKey);
+      const percent = total > 0 ? (count / total) * 100 : 0;
+      return {
+        categoryKey,
+        label: category.label,
+        color: category.color,
+        count,
+        percent,
+        percentLabel: formatPercent(percent),
+      };
+    })
+    .sort((left, right) => {
+      if (right.count !== left.count) {
+        return right.count - left.count;
+      }
+      return naturalCompare(left.label, right.label);
     });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(parseApiErrorPayload(payload));
-    }
-
-    pins = pins.filter((candidate) => candidate.id !== pinId);
-    renderPins();
-    renderItemList();
-    setStatus("Item removed.", "muted");
-  } catch (error) {
-    console.error("Could not remove MyHub pin:", error);
-    setStatus(error instanceof Error ? error.message : "Could not remove item.", "error");
-  }
 }
 
-async function clearCurrentFloorPins() {
-  const floorPins = getCurrentFloorPins();
-  if (!floorPins.length) {
-    return;
-  }
-  if (!window.confirm(`Clear ${floorPins.length} item${floorPins.length === 1 ? "" : "s"} from this floor?`)) {
-    return;
-  }
-
-  setStatus("Clearing current floor...", "muted");
-  const params = new URLSearchParams({
-    building_id: currentBuildingId,
-    floor_id: currentFloorId,
-  });
-  if (questionnaireContext.recordId) {
-    params.set("record_id", questionnaireContext.recordId);
-  }
-
-  try {
-    const response = await apiRequest(`${API_MYHUB_PINS}?${params.toString()}`, { method: "DELETE" });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(parseApiErrorPayload(payload));
-    }
-
-    pins = pins.filter((pin) => {
-      const isCurrentFloor = pin.buildingId === currentBuildingId && pin.floorId === currentFloorId;
-      const isCurrentRespondent = !questionnaireContext.recordId || pin.recordId === questionnaireContext.recordId;
-      return !(isCurrentFloor && isCurrentRespondent);
-    });
-    renderPins();
-    renderItemList();
-    setStatus("Current floor cleared.", "muted");
-  } catch (error) {
-    console.error("Could not clear MyHub floor:", error);
-    setStatus(error instanceof Error ? error.message : "Could not clear current floor.", "error");
-  }
+function formatPercent(value) {
+  const safeValue = Number.isFinite(value) ? value : 0;
+  const rounded = Math.round(safeValue * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%`;
 }
 
 function getCurrentFloorPins() {
@@ -993,7 +1118,7 @@ async function loadPins() {
     const payload = await apiGet(buildMyHubPinsListUrl());
     pins = Array.isArray(payload.pins) ? payload.pins : [];
     renderPins();
-    renderItemList();
+    renderItemDistribution();
   } catch (error) {
     console.error("Could not load MyHub pins:", error);
     pins = [];

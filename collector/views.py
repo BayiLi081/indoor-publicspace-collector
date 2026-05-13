@@ -51,6 +51,7 @@ from .models import (
   FlowingLineRecord,
   LargeGroupRecord,
   MyHubConceptPin,
+  PinUserInfo,
   PersonQuestionnaireResponse,
   SiteObservation,
 )
@@ -97,6 +98,13 @@ MYHUB_CATEGORY_COLORS = {
   "event_spaces": "#dc2626",
   "exercise_areas": "#ca8a04",
   "makerspaces": "#9333ea",
+}
+PIN_USER_INFO_ALLOWED_VALUES = {
+  "gender": {choice[0] for choice in PinUserInfo.GENDER_CHOICES},
+  "ethnicGroup": {choice[0] for choice in PinUserInfo.ETHNIC_GROUP_CHOICES},
+  "ageGroup": {choice[0] for choice in PinUserInfo.AGE_GROUP_CHOICES},
+  "housingType": {choice[0] for choice in PinUserInfo.HOUSING_TYPE_CHOICES},
+  "tenureStatus": {choice[0] for choice in PinUserInfo.TENURE_CHOICES},
 }
 PERSON_QUESTIONNAIRE_ALLOWED_CHOICES = {
   "mainPurpose": {choice[0] for choice in PersonQuestionnaireResponse.MAIN_PURPOSE_CHOICES},
@@ -623,9 +631,14 @@ def api_myhub_pins(request: HttpRequest) -> JsonResponse:
     return error_response
 
   try:
-    pin = build_myhub_pin_from_payload(payload, device_ip=get_request_ip_address(request))
-    pin.full_clean()
-    pin.save()
+    pin, pin_user_info = build_myhub_pin_from_payload(payload, device_ip=get_request_ip_address(request))
+    with transaction.atomic():
+      if pin_user_info is not None and pin_user_info._state.adding:
+        pin_user_info.full_clean()
+        pin_user_info.save()
+      pin.pin_user_info = pin_user_info
+      pin.full_clean()
+      pin.save()
   except DatabaseError as exc:
     return database_error_response(exc)
   except ValidationError as exc:
@@ -1165,7 +1178,11 @@ def build_flowing_line_record_from_payload(payload: dict[str, Any]) -> tuple[Flo
   return flowing_record, count_records
 
 
-def build_myhub_pin_from_payload(payload: dict[str, Any], *, device_ip: str | None = None) -> MyHubConceptPin:
+def build_myhub_pin_from_payload(
+  payload: dict[str, Any],
+  *,
+  device_ip: str | None = None,
+) -> tuple[MyHubConceptPin, PinUserInfo | None]:
   building_id = require_non_empty_string(payload, "buildingId")
   floor_id = require_non_empty_string(payload, "floorId")
   category_key = parse_myhub_category_key(payload.get("categoryKey"))
@@ -1175,6 +1192,10 @@ def build_myhub_pin_from_payload(payload: dict[str, Any], *, device_ip: str | No
 
   activity_record = parse_optional_activity_record(payload.get("recordId"))
   questionnaire_response = parse_optional_questionnaire_response(payload.get("questionnaireResponseId"))
+  pin_user_info = parse_pin_user_info_for_pin(
+    payload,
+    questionnaire_response=questionnaire_response,
+  )
   actor_id = optional_string(payload.get("actorId")) or (activity_record.actor_id if activity_record else "")
   respondent_postcode = parse_postcode(payload.get("postcode"), required=False)
 
@@ -1185,6 +1206,7 @@ def build_myhub_pin_from_payload(payload: dict[str, Any], *, device_ip: str | No
     floor_label=optional_string(payload.get("floorLabel")),
     activity_record=activity_record,
     questionnaire_response=questionnaire_response,
+    pin_user_info=pin_user_info,
     actor_id=actor_id,
     respondent_postcode=respondent_postcode,
     category_key=category_key,
@@ -1193,7 +1215,7 @@ def build_myhub_pin_from_payload(payload: dict[str, Any], *, device_ip: str | No
     device_ip=device_ip,
     location_x_pct=location_x_pct,
     location_y_pct=location_y_pct,
-  )
+  ), pin_user_info
 
 
 def parse_myhub_category_key(value: Any) -> str:
@@ -1232,6 +1254,70 @@ def parse_optional_questionnaire_response(value: Any) -> PersonQuestionnaireResp
   if response is None:
     raise ValidationError({"questionnaireResponseId": ["Questionnaire response does not exist."]})
   return response
+
+
+def parse_pin_user_info_for_pin(
+  payload: dict[str, Any],
+  *,
+  questionnaire_response: PersonQuestionnaireResponse | None,
+) -> PinUserInfo | None:
+  if questionnaire_response is not None:
+    return None
+
+  existing_pin_user_info = parse_optional_pin_user_info(payload.get("pinUserInfoId"))
+  if existing_pin_user_info is not None:
+    return existing_pin_user_info
+
+  raw_pin_user_info = payload.get("pinUserInfo")
+  if not isinstance(raw_pin_user_info, dict):
+    raise ValidationError({"pinUserInfo": ["This short questionnaire is required before placing a pin."]})
+  return build_pin_user_info_from_payload(raw_pin_user_info)
+
+
+def parse_optional_pin_user_info(value: Any) -> PinUserInfo | None:
+  if not isinstance(value, str) or not value.strip():
+    return None
+
+  try:
+    pin_user_info_id = UUID(value.strip())
+  except (TypeError, ValueError):
+    raise ValidationError({"pinUserInfoId": ["pinUserInfoId must be a valid UUID."]})
+
+  pin_user_info = PinUserInfo.objects.filter(id=pin_user_info_id).first()
+  if pin_user_info is None:
+    raise ValidationError({"pinUserInfoId": ["pinUserInfoId does not exist."]})
+  return pin_user_info
+
+
+def build_pin_user_info_from_payload(payload: dict[str, Any]) -> PinUserInfo:
+  gender = parse_choice_value(payload.get("gender"), "gender", "gender")
+  ethnic_group = parse_choice_value(payload.get("ethnicGroup"), "ethnicGroup", "ethnicGroup")
+  age_group = parse_choice_value(payload.get("ageGroup"), "ageGroup", "ageGroup")
+  housing_type = parse_choice_value(payload.get("housingType"), "housingType", "housingType")
+  tenure_status = parse_choice_value(payload.get("tenureStatus"), "tenureStatus", "tenureStatus")
+  housing_type_other = optional_string(payload.get("housingTypeOther"))
+
+  if housing_type == "other" and not housing_type_other:
+    raise ValidationError({"housingTypeOther": ["Please specify your housing type."]})
+
+  return PinUserInfo(
+    gender=gender,
+    ethnic_group=ethnic_group,
+    age_group=age_group,
+    housing_type=housing_type,
+    housing_type_other=housing_type_other,
+    tenure_status=tenure_status,
+  )
+
+
+def parse_choice_value(value: Any, field_key: str, allowed_key: str) -> str:
+  if not isinstance(value, str) or not value.strip():
+    raise ValidationError({field_key: ["This field is required."]})
+
+  normalized = value.strip()
+  if normalized not in PIN_USER_INFO_ALLOWED_VALUES[allowed_key]:
+    raise ValidationError({field_key: ["This value is invalid."]})
+  return normalized
 
 
 def require_non_empty_string(payload: dict[str, Any], key: str) -> str:
@@ -1884,6 +1970,7 @@ def serialize_myhub_pin(pin: MyHubConceptPin) -> dict[str, Any]:
     "floorLabel": pin.floor_label,
     "recordId": str(pin.activity_record_id) if pin.activity_record_id else None,
     "questionnaireResponseId": str(pin.questionnaire_response_id) if pin.questionnaire_response_id else None,
+    "pinUserInfoId": str(pin.pin_user_info_id) if pin.pin_user_info_id else None,
     "actorId": pin.actor_id or None,
     "postcode": pin.respondent_postcode or None,
     "categoryKey": pin.category_key,

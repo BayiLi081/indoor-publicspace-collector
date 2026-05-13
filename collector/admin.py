@@ -6,6 +6,7 @@ from .models import (
   FlowingLineCount,
   FlowingLineRecord,
   MyHubConceptPin,
+  PinUserInfo,
   PersonQuestionnaireResponse,
 )
 
@@ -79,6 +80,7 @@ class MyHubConceptPinAdmin(admin.ModelAdmin):
     "category_label",
     "actor_id",
     "respondent_postcode",
+    "pin_user_info",
     "building_id",
     "floor_id",
     "device_ip",
@@ -87,4 +89,19 @@ class MyHubConceptPinAdmin(admin.ModelAdmin):
   )
   list_filter = ("building_id", "floor_id", "category_key")
   search_fields = ("building_id", "building_label", "floor_id", "floor_label", "category_label", "device_ip")
+  ordering = ("-created_at",)
+
+
+@admin.register(PinUserInfo)
+class PinUserInfoAdmin(admin.ModelAdmin):
+  list_display = (
+    "created_at",
+    "gender",
+    "ethnic_group",
+    "age_group",
+    "housing_type",
+    "tenure_status",
+  )
+  list_filter = ("gender", "ethnic_group", "age_group", "housing_type", "tenure_status")
+  search_fields = ("housing_type_other",)
   ordering = ("-created_at",)

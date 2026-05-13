@@ -4,7 +4,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import ActivityRecord, LargeGroupRecord, MyHubConceptPin
+from .models import ActivityRecord, LargeGroupRecord, MyHubConceptPin, PinUserInfo
 
 
 @override_settings(MANAGEMENT_ACCESS_ENABLED=True, MANAGEMENT_ACCESS_CODE="test-code")
@@ -113,6 +113,16 @@ class AutoActorIdTests(TestCase):
 
 
 class MyHubPinIpCaptureTests(TestCase):
+  def build_pin_user_info_payload(self) -> dict:
+    return {
+      "gender": "male",
+      "ethnicGroup": "chinese",
+      "ageGroup": "20_60",
+      "housingType": "hdb_4_room",
+      "housingTypeOther": "",
+      "tenureStatus": "owner",
+    }
+
   def test_myhub_pin_saves_remote_addr_as_device_ip(self):
     payload = {
       "buildingId": "SUTD",
@@ -120,6 +130,7 @@ class MyHubPinIpCaptureTests(TestCase):
       "floorId": "main-buildings",
       "floorLabel": "Floor 3",
       "categoryKey": "tables",
+      "pinUserInfo": self.build_pin_user_info_payload(),
       "location": {"xPct": 60.5, "yPct": 30.25},
     }
 
@@ -134,3 +145,26 @@ class MyHubPinIpCaptureTests(TestCase):
     pin = MyHubConceptPin.objects.get()
     self.assertEqual(pin.device_ip, "203.0.113.7")
     self.assertEqual(response.json()["pin"]["deviceIp"], "203.0.113.7")
+
+  def test_myhub_pin_saves_and_links_quick_profile(self):
+    payload = {
+      "buildingId": "SUTD",
+      "buildingLabel": "SUTD",
+      "floorId": "main-buildings",
+      "floorLabel": "Floor 3",
+      "categoryKey": "tables",
+      "pinUserInfo": self.build_pin_user_info_payload(),
+      "location": {"xPct": 60.5, "yPct": 30.25},
+    }
+
+    response = self.client.post(
+      reverse("api_myhub_pins"),
+      data=json.dumps(payload),
+      content_type="application/json",
+    )
+
+    self.assertEqual(response.status_code, 201, response.content)
+    self.assertEqual(PinUserInfo.objects.count(), 1)
+    pin = MyHubConceptPin.objects.select_related("pin_user_info").get()
+    self.assertIsNotNone(pin.pin_user_info)
+    self.assertEqual(response.json()["pin"]["pinUserInfoId"], str(pin.pin_user_info_id))

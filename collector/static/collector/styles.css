@@ -2363,6 +2363,16 @@ th {
   padding: 1rem;
 }
 
+.pin-user-info-modal-card {
+  width: min(560px, 100%);
+}
+
+.pin-user-info-form {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
 .myhub-tool-panel h2 {
   margin: 0 0 0.75rem;
   font-size: 1rem;
@@ -2403,7 +2413,7 @@ th {
   background: var(--category-color);
 }
 
-.myhub-item-list {
+.myhub-bar-chart {
   display: grid;
   gap: 0.55rem;
   max-height: min(42vh, 32rem);
@@ -2416,41 +2426,47 @@ th {
   font-size: 0.9rem;
 }
 
-.myhub-item-row {
+.myhub-bar-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 0.55rem;
-  align-items: center;
+  gap: 0.45rem;
   padding: 0.55rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
 }
 
-.myhub-item-row strong,
-.myhub-item-row span {
+.myhub-bar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.65rem;
+}
+
+.myhub-bar-head strong,
+.myhub-bar-head span {
   display: block;
 }
 
-.myhub-item-row span {
+.myhub-bar-head span {
   color: var(--muted);
   font-size: 0.8rem;
 }
 
-.myhub-item-index {
-  width: 1.45rem;
-  height: 1.45rem;
-  display: grid;
-  place-items: center;
+.myhub-bar-track {
+  position: relative;
+  height: 0.75rem;
   border-radius: 999px;
-  background: var(--pin-color);
-  color: #fff !important;
-  font-weight: 800;
+  background: #e5eaf1;
+  overflow: hidden;
 }
 
-.myhub-remove-btn {
-  min-height: 2rem;
-  padding: 0.25rem 0.55rem;
+.myhub-bar-fill {
+  display: block;
+  height: 100%;
+  min-width: 0.6rem;
+  border-radius: inherit;
+  background: var(--bar-color);
+  transition: width 220ms ease;
 }
 
 .myhub-actions {

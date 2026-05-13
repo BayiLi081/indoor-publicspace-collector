@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MyHub Concept Planner</title>
-  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260512-7">
+  <link rel="stylesheet" href="{% static 'collector/styles.css' %}?v=20260513-2">
 </head>
 <body>
   <header class="topbar">
@@ -70,14 +70,11 @@
       <section class="myhub-tool-panel">
         <div class="records-head">
           <div>
-            <h2>Placed Items</h2>
+            <h2>Item Proportion</h2>
             <p id="myhubItemSummary" class="records-summary">0 items</p>
           </div>
         </div>
-        <div id="myhubItemList" class="myhub-item-list"></div>
-        <div class="actions myhub-actions">
-          <button id="clearMyhubBtn" type="button" class="secondary">Clear</button>
-        </div>
+        <div id="myhubBarChart" class="myhub-bar-chart" role="img" aria-label="Proportion of placed idea categories on this floor"></div>
       </section>
     </aside>
   </main>
@@ -102,6 +99,86 @@
     </div>
   </div>
 
-  <script type="module" src="{% static 'collector/myhub.js' %}?v=20260512-4"></script>
+  <div id="pinUserInfoModal" class="modal-shell" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-pin-user-info-close></div>
+    <div class="modal-card pin-user-info-modal-card" role="dialog" aria-modal="true" aria-labelledby="pinUserInfoModalTitle">
+      <div class="modal-head">
+        <div>
+          <h3 id="pinUserInfoModalTitle">Quick Profile Before Pinning</h3>
+          <p class="modal-subtitle">Needed once for non-intercept users.</p>
+        </div>
+      </div>
+      <form id="pinUserInfoForm" class="pin-user-info-form">
+        <label>
+          Gender
+          <select name="gender" required>
+            <option value="" selected>Select</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+
+        <label>
+          Ethnic group
+          <select name="ethnicGroup" required>
+            <option value="" selected>Select</option>
+            <option value="chinese">Chinese</option>
+            <option value="malay">Malay</option>
+            <option value="indian">Indian</option>
+            <option value="others">Others</option>
+          </select>
+        </label>
+
+        <label>
+          Age group
+          <select name="ageGroup" required>
+            <option value="" selected>Select</option>
+            <option value="under_10">&lt;10 years old</option>
+            <option value="10_20">10-20 years old</option>
+            <option value="20_60">20-60 years old</option>
+            <option value="over_60">&gt;60 years old</option>
+          </select>
+        </label>
+
+        <label>
+          Housing type
+          <select id="pinHousingType" name="housingType" required>
+            <option value="" selected>Select</option>
+            <option value="hdb_1_2_room">1 or 2 room HDB flat</option>
+            <option value="hdb_3_room">3 room HDB flat</option>
+            <option value="hdb_4_room">4 room HDB flat</option>
+            <option value="hdb_5_room">5 room HDB flat</option>
+            <option value="private_condo_apartment">Private condo/ apartment</option>
+            <option value="private_landed">Private landed housing</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+
+        <label id="pinHousingTypeOtherWrap" hidden>
+          Other housing type
+          <input type="text" id="pinHousingTypeOther" name="housingTypeOther" maxlength="255" placeholder="Please specify">
+        </label>
+
+        <label>
+          Tenant or owner
+          <select name="tenureStatus" required>
+            <option value="" selected>Select</option>
+            <option value="tenant">Tenant</option>
+            <option value="owner">Owner</option>
+          </select>
+        </label>
+
+        <p id="pinUserInfoError" class="save-prompt" data-state="error" hidden></p>
+
+        <div class="actions">
+          <button type="button" class="secondary" data-pin-user-info-close>Cancel</button>
+          <button type="submit">Continue</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="{% static 'collector/myhub.js' %}?v=20260513-4"></script>
 </body>
 </html>

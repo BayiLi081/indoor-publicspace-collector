@@ -64,4 +64,5 @@ pnpm-debug.log*
 # assets/ and its subfolders should be picked up by git.
 /assets/**
 !/assets/**/
+!/assets/intercept-survey.json
 !/assets/**/intercept-survey.json
