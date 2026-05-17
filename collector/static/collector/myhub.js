@@ -14,6 +14,8 @@ const MAX_MAP_ZOOM = 16;
 const MAP_ZOOM_STEP = 0.1;
 const DEFAULT_MAP_ZOOM = 1;
 const WHEEL_ZOOM_SENSITIVITY = 0.0016;
+const OPEN_IDEA_CATEGORY_KEY = "open_idea";
+const OPEN_IDEA_MAX_LENGTH = 128;
 
 const LEGACY_BUILDING_MAPS = {
   [ROOT_BUILDING_ID]: {
@@ -28,6 +30,7 @@ const LEGACY_BUILDING_MAPS = {
 };
 
 const MYHUB_CATEGORIES = [
+  { key: OPEN_IDEA_CATEGORY_KEY, label: "Open idea", color: "#0d9488" },
   { key: "tables", label: "Tables", color: "#2563eb" },
   { key: "benches", label: "Benches", color: "#0f766e" },
   { key: "soft_seating_corners", label: "Soft seating corners", color: "#db2777" },
@@ -57,18 +60,19 @@ const locateViaGpsBtn = document.getElementById("locateViaGpsBtn");
 const locateViaPoiBtn = document.getElementById("locateViaPoiBtn");
 const locateViaPicBtn = document.getElementById("locateViaPicBtn");
 const categoryPalette = document.getElementById("myhubCategoryPalette");
+const itemsToggleBtn = document.getElementById("myhubItemsToggle");
+const itemsPanel = document.getElementById("myhubItemsPanel");
 const itemSummary = document.getElementById("myhubItemSummary");
 const barChart = document.getElementById("myhubBarChart");
 const statusEl = document.getElementById("myhubStatus");
+const openIdeaModal = document.getElementById("openIdeaModal");
+const openIdeaForm = document.getElementById("openIdeaForm");
+const openIdeaInput = document.getElementById("openIdeaInput");
+const openIdeaError = document.getElementById("openIdeaError");
+const openIdeaCount = document.getElementById("openIdeaCount");
 const picPreviewModal = document.getElementById("picPreviewModal");
 const picPreviewFrame = document.getElementById("picPreviewFrame");
 const picPreviewModalCoords = document.getElementById("picPreviewModalCoords");
-const pinUserInfoModal = document.getElementById("pinUserInfoModal");
-const pinUserInfoForm = document.getElementById("pinUserInfoForm");
-const pinHousingTypeSelect = document.getElementById("pinHousingType");
-const pinHousingTypeOtherWrap = document.getElementById("pinHousingTypeOtherWrap");
-const pinHousingTypeOtherInput = document.getElementById("pinHousingTypeOther");
-const pinUserInfoError = document.getElementById("pinUserInfoError");
 const poiMapsCache = new Map();
 const poiLoadPromises = new Map();
 const photoMapsCache = new Map();
@@ -94,8 +98,7 @@ let poiRequestToken = 0;
 let photoRequestToken = 0;
 let shouldAnimatePois = false;
 let questionnaireContext = parseQuestionnaireContext();
-let pinUserInfo = null;
-let pendingPinPoint = null;
+let pendingOpenIdeaResolve = null;
 
 initialize();
 
@@ -109,7 +112,7 @@ async function initialize() {
 
   buildingSelect.addEventListener("change", onBuildingChange);
   floorSelect.addEventListener("change", onFloorChange);
-  mapWrap.addEventListener("pointerdown", onMapPointerDown);
+  mapImage.addEventListener("pointerdown", onMapPointerDown);
   mapWrap.addEventListener("pointermove", onMapPointerMove);
   mapWrap.addEventListener("wheel", onMapWheel, { passive: false });
   mapWrap.addEventListener("touchstart", onMapTouchStart, { passive: true });
@@ -139,15 +142,20 @@ async function initialize() {
   if (picPreviewModal) {
     picPreviewModal.addEventListener("click", onPicPreviewModalClick);
   }
-  if (pinUserInfoModal) {
-    pinUserInfoModal.addEventListener("click", onPinUserInfoModalClick);
+  if (itemsToggleBtn) {
+    itemsToggleBtn.addEventListener("click", toggleItemsPanel);
   }
-  if (pinUserInfoForm) {
-    pinUserInfoForm.addEventListener("submit", onPinUserInfoFormSubmit);
+  if (openIdeaForm) {
+    openIdeaForm.addEventListener("submit", onOpenIdeaFormSubmit);
   }
-  if (pinHousingTypeSelect) {
-    pinHousingTypeSelect.addEventListener("change", onPinHousingTypeChange);
+  if (openIdeaInput) {
+    openIdeaInput.addEventListener("input", updateOpenIdeaCount);
   }
+  if (openIdeaModal) {
+    openIdeaModal.addEventListener("click", onOpenIdeaModalClick);
+  }
+  document.addEventListener("keydown", onDocumentKeydown);
+
   setMapZoom(DEFAULT_MAP_ZOOM, { preserveCenter: false });
 
   try {
@@ -307,134 +315,107 @@ function renderCategoryPalette() {
     button.addEventListener("click", () => {
       activeCategoryKey = button.dataset.myhubCategory || MYHUB_CATEGORIES[0].key;
       renderCategoryPalette();
-      setStatus(`${getCategory(activeCategoryKey).label} active. Tap the map to place a pin.`, "muted");
+      const category = getCategory(activeCategoryKey);
+      if (category.key === OPEN_IDEA_CATEGORY_KEY) {
+        setStatus("Open idea active. Tap the map, then enter your idea text.", "muted");
+        return;
+      }
+      setStatus(`${category.label} active. Tap the map to place a pin.`, "muted");
     });
   });
 }
 
-function requiresPinUserInfo() {
-  return !questionnaireContext.questionnaireResponseId;
+function requestOpenIdeaLabel() {
+  if (!openIdeaModal || !openIdeaForm || !openIdeaInput) {
+    setStatus("Open idea input is unavailable.", "error");
+    return Promise.resolve(null);
+  }
+
+  if (pendingOpenIdeaResolve) {
+    pendingOpenIdeaResolve(null);
+  }
+
+  openIdeaForm.reset();
+  setOpenIdeaError("");
+  updateOpenIdeaCount();
+  openIdeaModal.hidden = false;
+  openIdeaModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+  window.requestAnimationFrame(() => openIdeaInput.focus());
+
+  return new Promise((resolve) => {
+    pendingOpenIdeaResolve = resolve;
+  });
 }
 
-async function collectPinUserInfo() {
-  if (!pinUserInfoModal || !pinUserInfoForm) {
-    return;
-  }
-
-  resetPinUserInfoForm();
-  pinUserInfoModal.hidden = false;
-  pinUserInfoModal.setAttribute("aria-hidden", "false");
-}
-
-function closePinUserInfoModal() {
-  if (!pinUserInfoModal || !pinUserInfoForm) {
-    return;
-  }
-
-  pinUserInfoModal.hidden = true;
-  pinUserInfoModal.setAttribute("aria-hidden", "true");
-}
-
-function resetPinUserInfoForm() {
-  if (!pinUserInfoForm) {
-    return;
-  }
-
-  pinUserInfoForm.reset();
-  if (pinUserInfoError) {
-    pinUserInfoError.hidden = true;
-    pinUserInfoError.textContent = "";
-  }
-  onPinHousingTypeChange();
-}
-
-function onPinUserInfoModalClick(event) {
-  const target = event.target;
-  if (!(target instanceof HTMLElement)) {
-    return;
-  }
-  if (target.hasAttribute("data-pin-user-info-close")) {
-    pendingPinPoint = null;
-    closePinUserInfoModal();
-  }
-}
-
-function onPinHousingTypeChange() {
-  if (!pinHousingTypeSelect || !pinHousingTypeOtherWrap || !pinHousingTypeOtherInput) {
-    return;
-  }
-
-  const isOther = pinHousingTypeSelect.value === "other";
-  pinHousingTypeOtherWrap.hidden = !isOther;
-  pinHousingTypeOtherInput.required = isOther;
-  if (!isOther) {
-    pinHousingTypeOtherInput.value = "";
-  }
-}
-
-function onPinUserInfoFormSubmit(event) {
+function onOpenIdeaFormSubmit(event) {
   event.preventDefault();
-  if (!pinUserInfoForm) {
+  if (!openIdeaInput) {
+    closeOpenIdeaModal(null);
     return;
   }
 
-  const formData = new FormData(pinUserInfoForm);
-  const info = {
-    gender: String(formData.get("gender") || "").trim(),
-    ethnicGroup: String(formData.get("ethnicGroup") || "").trim(),
-    ageGroup: String(formData.get("ageGroup") || "").trim(),
-    housingType: String(formData.get("housingType") || "").trim(),
-    housingTypeOther: String(formData.get("housingTypeOther") || "").trim(),
-    tenureStatus: String(formData.get("tenureStatus") || "").trim(),
-  };
-
-  if (!info.gender || !info.ethnicGroup || !info.ageGroup || !info.housingType || !info.tenureStatus) {
-    showPinUserInfoError("Please answer all required fields.");
+  const normalized = openIdeaInput.value.trim();
+  if (!normalized) {
+    setOpenIdeaError("Enter idea text before placing it.");
     return;
   }
-  if (info.housingType === "other" && !info.housingTypeOther) {
-    showPinUserInfoError("Please specify your housing type.");
+  if (normalized.length > OPEN_IDEA_MAX_LENGTH) {
+    setOpenIdeaError(`Keep open idea text to ${OPEN_IDEA_MAX_LENGTH} characters or fewer.`);
     return;
   }
 
-  showPinUserInfoError("");
-  pinUserInfo = info;
-  closePinUserInfoModal();
+  closeOpenIdeaModal(normalized);
+}
 
-  if (pendingPinPoint) {
-    const point = pendingPinPoint;
-    pendingPinPoint = null;
-    void saveMyHubPin(point);
+function onOpenIdeaModalClick(event) {
+  const target = event.target;
+  if (target instanceof HTMLElement && target.hasAttribute("data-open-idea-close")) {
+    closeOpenIdeaModal(null);
   }
 }
 
-function showPinUserInfoError(message) {
-  if (!pinUserInfoError) {
-    return;
+function onDocumentKeydown(event) {
+  if (event.key === "Escape" && openIdeaModal && !openIdeaModal.hidden) {
+    closeOpenIdeaModal(null);
   }
-  pinUserInfoError.textContent = message;
-  pinUserInfoError.hidden = !message;
 }
 
-function buildPinUserInfoPayload(info) {
-  if (!info) {
-    return null;
+function closeOpenIdeaModal(value) {
+  if (!openIdeaModal) {
+    return;
   }
-  return {
-    gender: info.gender,
-    ethnicGroup: info.ethnicGroup,
-    ageGroup: info.ageGroup,
-    housingType: info.housingType,
-    housingTypeOther: info.housingType === "other" ? info.housingTypeOther : "",
-    tenureStatus: info.tenureStatus,
-  };
+
+  openIdeaModal.hidden = true;
+  openIdeaModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+
+  const resolve = pendingOpenIdeaResolve;
+  pendingOpenIdeaResolve = null;
+  if (resolve) {
+    resolve(value);
+  }
+}
+
+function setOpenIdeaError(message) {
+  if (!openIdeaError) {
+    return;
+  }
+
+  openIdeaError.textContent = message;
+  openIdeaError.hidden = !message;
+}
+
+function updateOpenIdeaCount() {
+  if (!openIdeaInput || !openIdeaCount) {
+    return;
+  }
+
+  openIdeaCount.textContent = `${openIdeaInput.value.length} / ${OPEN_IDEA_MAX_LENGTH}`;
 }
 
 async function onMapPointerDown(event) {
   if (!mapImage.getAttribute("src") || isSavingPin) {
-    return;
-  }
-  if (isMapInteractiveOverlayTarget(event.target)) {
     return;
   }
 
@@ -444,25 +425,14 @@ async function onMapPointerDown(event) {
   }
 
   event.preventDefault();
-
-  if (requiresPinUserInfo() && !pinUserInfo) {
-    pendingPinPoint = point;
-    collectPinUserInfo();
-    setStatus("Please complete the short profile before placing a pin.", "muted");
+  const category = getCategory(activeCategoryKey);
+  const categoryLabel = category.key === OPEN_IDEA_CATEGORY_KEY ? await requestOpenIdeaLabel() : category.label;
+  if (!categoryLabel) {
     return;
   }
 
-  await saveMyHubPin(point);
-}
-
-function isMapInteractiveOverlayTarget(target) {
-  return target instanceof Element && !!target.closest(".myhub-pin, .pic-marker");
-}
-
-async function saveMyHubPin(point) {
-  const category = getCategory(activeCategoryKey);
   isSavingPin = true;
-  setStatus(`Saving ${category.label}...`, "muted");
+  setStatus(`Saving ${categoryLabel}...`, "muted");
 
   try {
     const response = await apiRequest(API_MYHUB_PINS, {
@@ -473,12 +443,11 @@ async function saveMyHubPin(point) {
         floorId: currentFloorId,
         floorLabel: getFloorLabel(currentBuildingId, currentFloorId),
         categoryKey: category.key,
+        categoryLabel,
         recordId: questionnaireContext.recordId,
         actorId: questionnaireContext.actorId,
         postcode: questionnaireContext.postcode,
         questionnaireResponseId: questionnaireContext.questionnaireResponseId,
-        pinUserInfoId: pinUserInfo?.id || "",
-        pinUserInfo: pinUserInfo?.id ? null : buildPinUserInfoPayload(pinUserInfo),
         location: point,
       },
     });
@@ -488,12 +457,9 @@ async function saveMyHubPin(point) {
     }
 
     pins = [payload.pin, ...pins.filter((pin) => pin.id !== payload.pin.id)];
-    if (payload.pin?.pinUserInfoId && pinUserInfo) {
-      pinUserInfo = { ...pinUserInfo, id: payload.pin.pinUserInfoId };
-    }
     renderPins();
     renderItemDistribution();
-    setStatus(`${category.label} placed.`, "success");
+    setStatus(`${payload.pin.categoryLabel || categoryLabel} placed.`, "success");
   } catch (error) {
     console.error("Could not save MyHub pin:", error);
     setStatus(error instanceof Error ? error.message : "Could not save item.", "error");
@@ -757,6 +723,12 @@ function renderPins() {
     >
       <span>${index + 1}</span>
     </button>
+    ${pin.categoryKey === OPEN_IDEA_CATEGORY_KEY ? `
+      <span
+        class="myhub-open-idea-label"
+        style="left: ${pin.xPct}%; top: ${pin.yPct}%; --pin-color: ${pin.color};"
+      >${escapeHtml(pin.categoryLabel)}</span>
+    ` : ""}
   `).join("");
 
   pinLayer.querySelectorAll("[data-myhub-pin-id]").forEach((button) => {
@@ -1107,6 +1079,17 @@ function formatPercent(value) {
   const safeValue = Number.isFinite(value) ? value : 0;
   const rounded = Math.round(safeValue * 10) / 10;
   return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%`;
+}
+
+function toggleItemsPanel() {
+  if (!itemsToggleBtn || !itemsPanel) {
+    return;
+  }
+
+  const expanded = itemsToggleBtn.getAttribute("aria-expanded") === "true";
+  const nextExpanded = !expanded;
+  itemsToggleBtn.setAttribute("aria-expanded", String(nextExpanded));
+  itemsPanel.hidden = !nextExpanded;
 }
 
 function getCurrentFloorPins() {

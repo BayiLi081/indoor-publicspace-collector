@@ -51,7 +51,6 @@ from .models import (
   FlowingLineRecord,
   LargeGroupRecord,
   MyHubConceptPin,
-  PinUserInfo,
   PersonQuestionnaireResponse,
   SiteObservation,
 )
@@ -63,6 +62,12 @@ MAX_PHOTO_PREVIEW_LENGTH = 180_000
 ALLOWED_OBSERVATION_TYPES = {"photo", "note", "questions"}
 AUTO_ACTOR_ID_PATTERN = re.compile(r"^CL(\d+)-P(\d+)$", re.IGNORECASE)
 AUTO_ACTOR_CLUSTER_SEQUENCE_KEY = "auto_actor_cluster"
+SESSION_ACTIVITY_RECORD_IDS_KEY = "capture_session_activity_record_ids"
+SESSION_LARGE_GROUP_RECORD_IDS_KEY = "capture_session_large_group_record_ids"
+SESSION_FLOWING_RECORD_IDS_KEY = "capture_session_flowing_record_ids"
+SESSION_MYHUB_PIN_IDS_KEY = "capture_session_myhub_pin_ids"
+SESSION_SITE_OBSERVATION_IDS_KEY = "capture_session_site_observation_ids"
+SESSION_PERSON_QUESTIONNAIRE_RESPONSE_IDS_KEY = "capture_session_person_questionnaire_response_ids"
 SHORT_QUESTION_RESPONSE_FIELDS = (
   ("seatingAvailability", "seating_availability"),
   ("greeneryLevel", "greenery_level"),
@@ -98,13 +103,7 @@ MYHUB_CATEGORY_COLORS = {
   "event_spaces": "#dc2626",
   "exercise_areas": "#ca8a04",
   "makerspaces": "#9333ea",
-}
-PIN_USER_INFO_ALLOWED_VALUES = {
-  "gender": {choice[0] for choice in PinUserInfo.GENDER_CHOICES},
-  "ethnicGroup": {choice[0] for choice in PinUserInfo.ETHNIC_GROUP_CHOICES},
-  "ageGroup": {choice[0] for choice in PinUserInfo.AGE_GROUP_CHOICES},
-  "housingType": {choice[0] for choice in PinUserInfo.HOUSING_TYPE_CHOICES},
-  "tenureStatus": {choice[0] for choice in PinUserInfo.TENURE_CHOICES},
+  "open_idea": "#0d9488",
 }
 PERSON_QUESTIONNAIRE_ALLOWED_CHOICES = {
   "mainPurpose": {choice[0] for choice in PersonQuestionnaireResponse.MAIN_PURPOSE_CHOICES},
@@ -381,12 +380,18 @@ def api_locate_via_gps(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "POST"])
 def api_records(request: HttpRequest) -> JsonResponse:
   if request.method == "GET":
-    denial_response = get_management_access_denial_response(request)
-    if denial_response is not None:
-      return denial_response
-
     try:
+      management_data_access = has_management_data_access(request)
       query = ActivityRecord.objects.all()
+      large_group_query = LargeGroupRecord.objects.all()
+
+      if not management_data_access:
+        query = constrain_queryset_to_session_ids(query, request, SESSION_ACTIVITY_RECORD_IDS_KEY)
+        large_group_query = constrain_queryset_to_session_ids(
+          large_group_query,
+          request,
+          SESSION_LARGE_GROUP_RECORD_IDS_KEY,
+        )
 
       building_id = request.GET.get("building_id", "").strip()
       floor_id = request.GET.get("floor_id", "").strip()
@@ -410,7 +415,6 @@ def api_records(request: HttpRequest) -> JsonResponse:
         )
 
       records = [serialize_record(record) for record in query]
-      large_group_query = LargeGroupRecord.objects.all()
 
       if building_id:
         large_group_query = large_group_query.filter(building_id=building_id)
@@ -461,6 +465,7 @@ def api_records(request: HttpRequest) -> JsonResponse:
         assign_auto_actor_ids([large_group_record])
         large_group_record.full_clean()
         large_group_record.save()
+      remember_session_model_ids(request, SESSION_LARGE_GROUP_RECORD_IDS_KEY, [large_group_record.id])
       return JsonResponse({"record": serialize_large_group_record(large_group_record)}, status=201)
 
     if batch_payload is not None:
@@ -485,6 +490,7 @@ def api_records(request: HttpRequest) -> JsonResponse:
           record.full_clean()
         for record in records:
           record.save()
+      remember_session_model_ids(request, SESSION_ACTIVITY_RECORD_IDS_KEY, [record.id for record in records])
     else:
       record = build_record_from_payload(
         payload,
@@ -495,6 +501,7 @@ def api_records(request: HttpRequest) -> JsonResponse:
         assign_auto_actor_ids([record])
         record.full_clean()
         record.save()
+      remember_session_model_ids(request, SESSION_ACTIVITY_RECORD_IDS_KEY, [record.id])
   except DatabaseError as exc:
     delete_image_object_if_unused(uploaded_photo_object_name)
     return database_error_response(exc)
@@ -511,7 +518,10 @@ def api_records(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET"])
 def api_records_next_cluster(request: HttpRequest) -> JsonResponse:
   try:
-    next_cluster_number = get_next_auto_actor_cluster_number()
+    if has_management_data_access(request):
+      next_cluster_number = get_next_auto_actor_cluster_number()
+    else:
+      next_cluster_number = get_next_session_auto_actor_cluster_number(request)
   except DatabaseError as exc:
     return database_error_response(exc)
 
@@ -527,12 +537,11 @@ def api_records_next_cluster(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "POST"])
 def api_flowing_records(request: HttpRequest) -> JsonResponse:
   if request.method == "GET":
-    denial_response = get_management_access_denial_response(request)
-    if denial_response is not None:
-      return denial_response
-
     try:
       query = FlowingLineRecord.objects.prefetch_related("counts").all()
+      if not has_management_data_access(request):
+        query = constrain_queryset_to_session_ids(query, request, SESSION_FLOWING_RECORD_IDS_KEY)
+
       building_id = request.GET.get("building_id", "").strip()
       floor_id = request.GET.get("floor_id", "").strip()
 
@@ -563,6 +572,7 @@ def api_flowing_records(request: HttpRequest) -> JsonResponse:
   except ValidationError as exc:
     return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
 
+  remember_session_model_ids(request, SESSION_FLOWING_RECORD_IDS_KEY, [flowing_record.id])
   return JsonResponse({"flowingRecord": serialize_flowing_line_record(flowing_record)}, status=201)
 
 
@@ -570,7 +580,11 @@ def api_flowing_records(request: HttpRequest) -> JsonResponse:
 def api_myhub_pins(request: HttpRequest) -> JsonResponse:
   if request.method == "GET":
     try:
+      management_data_access = has_management_data_access(request)
       query = MyHubConceptPin.objects.all()
+      if not management_data_access:
+        query = constrain_queryset_to_session_ids(query, request, SESSION_MYHUB_PIN_IDS_KEY)
+
       building_id = request.GET.get("building_id", "").strip()
       floor_id = request.GET.get("floor_id", "").strip()
       record_id = request.GET.get("record_id", "").strip()
@@ -599,12 +613,16 @@ def api_myhub_pins(request: HttpRequest) -> JsonResponse:
 
   if request.method == "DELETE":
     try:
+      management_data_access = has_management_data_access(request)
       pin_id = request.GET.get("id", "").strip()
       if pin_id:
         try:
-          deleted_count, _ = MyHubConceptPin.objects.filter(id=UUID(pin_id)).delete()
+          query = MyHubConceptPin.objects.filter(id=UUID(pin_id))
         except (TypeError, ValueError):
           raise ValidationError({"id": ["Pin id must be a valid UUID."]})
+        if not management_data_access:
+          query = constrain_queryset_to_session_ids(query, request, SESSION_MYHUB_PIN_IDS_KEY)
+        deleted_count, _ = query.delete()
         return JsonResponse({"deleted": deleted_count})
 
       building_id = request.GET.get("building_id", "").strip()
@@ -614,6 +632,8 @@ def api_myhub_pins(request: HttpRequest) -> JsonResponse:
         raise ValidationError({"floor": ["Provide id, or both building_id and floor_id query parameters."]})
 
       query = MyHubConceptPin.objects.filter(building_id=building_id, floor_id=floor_id)
+      if not management_data_access:
+        query = constrain_queryset_to_session_ids(query, request, SESSION_MYHUB_PIN_IDS_KEY)
       if record_id:
         try:
           query = query.filter(activity_record_id=UUID(record_id))
@@ -631,31 +651,35 @@ def api_myhub_pins(request: HttpRequest) -> JsonResponse:
     return error_response
 
   try:
-    pin, pin_user_info = build_myhub_pin_from_payload(payload, device_ip=get_request_ip_address(request))
-    with transaction.atomic():
-      if pin_user_info is not None and pin_user_info._state.adding:
-        pin_user_info.full_clean()
-        pin_user_info.save()
-      pin.pin_user_info = pin_user_info
-      pin.full_clean()
-      pin.save()
+    management_data_access = has_management_data_access(request)
+    pin = build_myhub_pin_from_payload(
+      payload,
+      device_ip=get_request_ip_address(request),
+      allowed_activity_record_ids=None
+      if management_data_access
+      else get_session_uuid_set(request, SESSION_ACTIVITY_RECORD_IDS_KEY),
+      allowed_questionnaire_response_ids=None
+      if management_data_access
+      else get_session_uuid_set(request, SESSION_PERSON_QUESTIONNAIRE_RESPONSE_IDS_KEY),
+    )
+    pin.full_clean()
+    pin.save()
   except DatabaseError as exc:
     return database_error_response(exc)
   except ValidationError as exc:
     return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
 
+  remember_session_model_ids(request, SESSION_MYHUB_PIN_IDS_KEY, [pin.id])
   return JsonResponse({"pin": serialize_myhub_pin(pin)}, status=201)
 
 
 @require_http_methods(["GET", "POST"])
 def api_site_observations(request: HttpRequest) -> JsonResponse:
   if request.method == "GET":
-    denial_response = get_management_access_denial_response(request)
-    if denial_response is not None:
-      return denial_response
-
     try:
       query = SiteObservation.objects.all()
+      if not has_management_data_access(request):
+        query = constrain_queryset_to_session_ids(query, request, SESSION_SITE_OBSERVATION_IDS_KEY)
 
       building_id = request.GET.get("building_id", "").strip()
       floor_id = request.GET.get("floor_id", "").strip()
@@ -702,18 +726,21 @@ def api_site_observations(request: HttpRequest) -> JsonResponse:
     delete_image_object_if_unused(uploaded_photo_object_name)
     return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
 
+  remember_session_model_ids(request, SESSION_SITE_OBSERVATION_IDS_KEY, [observation.id])
   return JsonResponse({"observation": serialize_site_observation(observation)}, status=201)
 
 
 @require_http_methods(["GET", "POST"])
 def api_person_questionnaire_responses(request: HttpRequest) -> JsonResponse:
   if request.method == "GET":
-    denial_response = get_management_access_denial_response(request)
-    if denial_response is not None:
-      return denial_response
-
     try:
       query = PersonQuestionnaireResponse.objects.select_related("activity_record").all()
+      if not has_management_data_access(request):
+        query = constrain_queryset_to_session_ids(
+          query,
+          request,
+          SESSION_PERSON_QUESTIONNAIRE_RESPONSE_IDS_KEY,
+        )
 
       record_id = request.GET.get("record_id", "").strip()
       actor_id = request.GET.get("actor_id", "").strip()
@@ -740,6 +767,13 @@ def api_person_questionnaire_responses(request: HttpRequest) -> JsonResponse:
 
   try:
     record_ids = parse_questionnaire_record_ids(payload.get("recordIds", payload.get("recordId")))
+    if not has_management_data_access(request):
+      validate_ids_in_current_session(
+        request,
+        record_ids,
+        SESSION_ACTIVITY_RECORD_IDS_KEY,
+        "recordIds",
+      )
     response_values = parse_person_questionnaire_responses(payload.get("responses", payload))
     questionnaire_time = parse_optional_datetime(payload.get("questionnaireTime"), "questionnaireTime")
 
@@ -771,6 +805,11 @@ def api_person_questionnaire_responses(request: HttpRequest) -> JsonResponse:
   except ValidationError as exc:
     return JsonResponse({"error": normalize_validation_error(exc)}, status=400)
 
+  remember_session_model_ids(
+    request,
+    SESSION_PERSON_QUESTIONNAIRE_RESPONSE_IDS_KEY,
+    [response.id for response in questionnaire_responses],
+  )
   return JsonResponse(
     {"responses": [serialize_person_questionnaire_response(response) for response in questionnaire_responses]},
     status=201,
@@ -857,6 +896,65 @@ def get_safe_redirect_target(request: HttpRequest, *, default_path: str, expecte
       return default_path
     return candidate
   return default_path
+
+
+def has_management_data_access(request: HttpRequest) -> bool:
+  return get_management_access_denial_response(request) is None
+
+
+def get_session_uuid_set(request: HttpRequest, key: str) -> set[str]:
+  raw_values = request.session.get(key, [])
+  if not isinstance(raw_values, list):
+    return set()
+
+  values = set()
+  for raw_value in raw_values:
+    try:
+      values.add(str(UUID(str(raw_value))))
+    except (TypeError, ValueError):
+      continue
+  return values
+
+
+def remember_session_model_ids(request: HttpRequest, key: str, ids: list[Any]) -> None:
+  current_ids = list(get_session_uuid_set(request, key))
+  seen_ids = set(current_ids)
+  for value in ids:
+    try:
+      normalized_id = str(UUID(str(value)))
+    except (TypeError, ValueError):
+      continue
+    if normalized_id in seen_ids:
+      continue
+    current_ids.append(normalized_id)
+    seen_ids.add(normalized_id)
+
+  request.session[key] = current_ids
+  request.session.modified = True
+
+
+def constrain_queryset_to_session_ids(query, request: HttpRequest, key: str):
+  ids = get_session_uuid_set(request, key)
+  if not ids:
+    return query.none()
+  return query.filter(id__in=ids)
+
+
+def validate_ids_in_current_session(
+  request: HttpRequest,
+  values: list[str],
+  session_key: str,
+  field_key: str,
+) -> None:
+  allowed_ids = get_session_uuid_set(request, session_key)
+  for raw_value in values:
+    try:
+      normalized_id = str(UUID(str(raw_value)))
+    except (TypeError, ValueError):
+      raise ValidationError({field_key: ["One or more selected records are invalid."]})
+    if normalized_id not in allowed_ids:
+      raise ValidationError({field_key: ["One or more selected records are not available in this session."]})
+
 
 def parse_request_payload(request: HttpRequest) -> tuple[dict[str, Any], Any | None, JsonResponse | None]:
   content_type = (request.content_type or "").lower()
@@ -970,6 +1068,34 @@ def get_next_auto_actor_cluster_number() -> int:
   sequence = ActivityIdSequence.objects.filter(key=AUTO_ACTOR_CLUSTER_SEQUENCE_KEY).first()
   sequence_next = sequence.next_cluster_number if sequence is not None else 1
   return max(sequence_next, get_max_stored_auto_actor_cluster_number() + 1)
+
+
+def get_next_session_auto_actor_cluster_number(request: HttpRequest) -> int:
+  max_cluster_number = 0
+  activity_record_ids = get_session_uuid_set(request, SESSION_ACTIVITY_RECORD_IDS_KEY)
+  large_group_record_ids = get_session_uuid_set(request, SESSION_LARGE_GROUP_RECORD_IDS_KEY)
+
+  actor_ids = list(
+    ActivityRecord.objects.filter(id__in=activity_record_ids, actor_id__istartswith="CL").values_list(
+      "actor_id",
+      flat=True,
+    )
+  )
+  actor_ids.extend(
+    LargeGroupRecord.objects.filter(id__in=large_group_record_ids, actor_id__istartswith="CL").values_list(
+      "actor_id",
+      flat=True,
+    )
+  )
+
+  for actor_id in actor_ids:
+    parsed_actor_id = parse_auto_actor_id(actor_id)
+    if parsed_actor_id is None:
+      continue
+    cluster_number, _ = parsed_actor_id
+    max_cluster_number = max(max_cluster_number, cluster_number)
+
+  return max_cluster_number + 1
 
 
 def allocate_auto_actor_cluster_numbers(cluster_count: int) -> list[int]:
@@ -1182,7 +1308,9 @@ def build_myhub_pin_from_payload(
   payload: dict[str, Any],
   *,
   device_ip: str | None = None,
-) -> tuple[MyHubConceptPin, PinUserInfo | None]:
+  allowed_activity_record_ids: set[str] | None = None,
+  allowed_questionnaire_response_ids: set[str] | None = None,
+) -> MyHubConceptPin:
   building_id = require_non_empty_string(payload, "buildingId")
   floor_id = require_non_empty_string(payload, "floorId")
   category_key = parse_myhub_category_key(payload.get("categoryKey"))
@@ -1190,14 +1318,19 @@ def build_myhub_pin_from_payload(
   if location_x_pct is None or location_y_pct is None:
     raise ValidationError({"location": ["Map coordinates are required."]})
 
-  activity_record = parse_optional_activity_record(payload.get("recordId"))
-  questionnaire_response = parse_optional_questionnaire_response(payload.get("questionnaireResponseId"))
-  pin_user_info = parse_pin_user_info_for_pin(
-    payload,
-    questionnaire_response=questionnaire_response,
+  activity_record = parse_optional_activity_record(
+    payload.get("recordId"),
+    allowed_record_ids=allowed_activity_record_ids,
+  )
+  questionnaire_response = parse_optional_questionnaire_response(
+    payload.get("questionnaireResponseId"),
+    allowed_response_ids=allowed_questionnaire_response_ids,
   )
   actor_id = optional_string(payload.get("actorId")) or (activity_record.actor_id if activity_record else "")
   respondent_postcode = parse_postcode(payload.get("postcode"), required=False)
+  category_label = MYHUB_CATEGORY_LABELS[category_key]
+  if category_key == "open_idea":
+    category_label = parse_myhub_open_idea_label(payload.get("categoryLabel"))
 
   return MyHubConceptPin(
     building_id=building_id,
@@ -1206,16 +1339,15 @@ def build_myhub_pin_from_payload(
     floor_label=optional_string(payload.get("floorLabel")),
     activity_record=activity_record,
     questionnaire_response=questionnaire_response,
-    pin_user_info=pin_user_info,
     actor_id=actor_id,
     respondent_postcode=respondent_postcode,
     category_key=category_key,
-    category_label=MYHUB_CATEGORY_LABELS[category_key],
+    category_label=category_label,
     category_color=MYHUB_CATEGORY_COLORS[category_key],
     device_ip=device_ip,
     location_x_pct=location_x_pct,
     location_y_pct=location_y_pct,
-  ), pin_user_info
+  )
 
 
 def parse_myhub_category_key(value: Any) -> str:
@@ -1228,7 +1360,19 @@ def parse_myhub_category_key(value: Any) -> str:
   return normalized
 
 
-def parse_optional_activity_record(value: Any) -> ActivityRecord | None:
+def parse_myhub_open_idea_label(value: Any) -> str:
+  if not isinstance(value, str):
+    raise ValidationError({"categoryLabel": ["Open idea text is required."]})
+
+  normalized = value.strip()
+  if not normalized:
+    raise ValidationError({"categoryLabel": ["Open idea text is required."]})
+  if len(normalized) > 128:
+    raise ValidationError({"categoryLabel": ["Open idea text must be 128 characters or fewer."]})
+  return normalized
+
+
+def parse_optional_activity_record(value: Any, *, allowed_record_ids: set[str] | None = None) -> ActivityRecord | None:
   if not isinstance(value, str) or not value.strip():
     return None
   try:
@@ -1236,13 +1380,20 @@ def parse_optional_activity_record(value: Any) -> ActivityRecord | None:
   except (TypeError, ValueError):
     raise ValidationError({"recordId": ["Record id must be a valid UUID."]})
 
+  if allowed_record_ids is not None and str(record_id) not in allowed_record_ids:
+    raise ValidationError({"recordId": ["Record is not available in this session."]})
+
   record = ActivityRecord.objects.filter(id=record_id).first()
   if record is None:
     raise ValidationError({"recordId": ["Selected person record does not exist."]})
   return record
 
 
-def parse_optional_questionnaire_response(value: Any) -> PersonQuestionnaireResponse | None:
+def parse_optional_questionnaire_response(
+  value: Any,
+  *,
+  allowed_response_ids: set[str] | None = None,
+) -> PersonQuestionnaireResponse | None:
   if not isinstance(value, str) or not value.strip():
     return None
   try:
@@ -1250,74 +1401,13 @@ def parse_optional_questionnaire_response(value: Any) -> PersonQuestionnaireResp
   except (TypeError, ValueError):
     raise ValidationError({"questionnaireResponseId": ["Questionnaire response id must be a valid UUID."]})
 
+  if allowed_response_ids is not None and str(response_id) not in allowed_response_ids:
+    raise ValidationError({"questionnaireResponseId": ["Questionnaire response is not available in this session."]})
+
   response = PersonQuestionnaireResponse.objects.filter(id=response_id).first()
   if response is None:
     raise ValidationError({"questionnaireResponseId": ["Questionnaire response does not exist."]})
   return response
-
-
-def parse_pin_user_info_for_pin(
-  payload: dict[str, Any],
-  *,
-  questionnaire_response: PersonQuestionnaireResponse | None,
-) -> PinUserInfo | None:
-  if questionnaire_response is not None:
-    return None
-
-  existing_pin_user_info = parse_optional_pin_user_info(payload.get("pinUserInfoId"))
-  if existing_pin_user_info is not None:
-    return existing_pin_user_info
-
-  raw_pin_user_info = payload.get("pinUserInfo")
-  if not isinstance(raw_pin_user_info, dict):
-    raise ValidationError({"pinUserInfo": ["This short questionnaire is required before placing a pin."]})
-  return build_pin_user_info_from_payload(raw_pin_user_info)
-
-
-def parse_optional_pin_user_info(value: Any) -> PinUserInfo | None:
-  if not isinstance(value, str) or not value.strip():
-    return None
-
-  try:
-    pin_user_info_id = UUID(value.strip())
-  except (TypeError, ValueError):
-    raise ValidationError({"pinUserInfoId": ["pinUserInfoId must be a valid UUID."]})
-
-  pin_user_info = PinUserInfo.objects.filter(id=pin_user_info_id).first()
-  if pin_user_info is None:
-    raise ValidationError({"pinUserInfoId": ["pinUserInfoId does not exist."]})
-  return pin_user_info
-
-
-def build_pin_user_info_from_payload(payload: dict[str, Any]) -> PinUserInfo:
-  gender = parse_choice_value(payload.get("gender"), "gender", "gender")
-  ethnic_group = parse_choice_value(payload.get("ethnicGroup"), "ethnicGroup", "ethnicGroup")
-  age_group = parse_choice_value(payload.get("ageGroup"), "ageGroup", "ageGroup")
-  housing_type = parse_choice_value(payload.get("housingType"), "housingType", "housingType")
-  tenure_status = parse_choice_value(payload.get("tenureStatus"), "tenureStatus", "tenureStatus")
-  housing_type_other = optional_string(payload.get("housingTypeOther"))
-
-  if housing_type == "other" and not housing_type_other:
-    raise ValidationError({"housingTypeOther": ["Please specify your housing type."]})
-
-  return PinUserInfo(
-    gender=gender,
-    ethnic_group=ethnic_group,
-    age_group=age_group,
-    housing_type=housing_type,
-    housing_type_other=housing_type_other,
-    tenure_status=tenure_status,
-  )
-
-
-def parse_choice_value(value: Any, field_key: str, allowed_key: str) -> str:
-  if not isinstance(value, str) or not value.strip():
-    raise ValidationError({field_key: ["This field is required."]})
-
-  normalized = value.strip()
-  if normalized not in PIN_USER_INFO_ALLOWED_VALUES[allowed_key]:
-    raise ValidationError({field_key: ["This value is invalid."]})
-  return normalized
 
 
 def require_non_empty_string(payload: dict[str, Any], key: str) -> str:
@@ -1970,7 +2060,6 @@ def serialize_myhub_pin(pin: MyHubConceptPin) -> dict[str, Any]:
     "floorLabel": pin.floor_label,
     "recordId": str(pin.activity_record_id) if pin.activity_record_id else None,
     "questionnaireResponseId": str(pin.questionnaire_response_id) if pin.questionnaire_response_id else None,
-    "pinUserInfoId": str(pin.pin_user_info_id) if pin.pin_user_info_id else None,
     "actorId": pin.actor_id or None,
     "postcode": pin.respondent_postcode or None,
     "categoryKey": pin.category_key,

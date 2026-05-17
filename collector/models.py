@@ -321,61 +321,6 @@ class FlowingLineCount(models.Model):
     return f"{self.flowing_line_id} {self.direction} {self.age_group}/{self.gender}: {self.count}"
 
 
-class PinUserInfo(models.Model):
-  GENDER_CHOICES = (
-    ("male", "Male"),
-    ("female", "Female"),
-    ("other", "Other"),
-  )
-  ETHNIC_GROUP_CHOICES = (
-    ("chinese", "Chinese"),
-    ("malay", "Malay"),
-    ("indian", "Indian"),
-    ("others", "Others"),
-  )
-  AGE_GROUP_CHOICES = (
-    ("under_10", "<10 years old"),
-    ("10_20", "10-20 years old"),
-    ("20_60", "20-60 years old"),
-    ("over_60", ">60 years old"),
-  )
-  HOUSING_TYPE_CHOICES = (
-    ("hdb_1_2_room", "1 or 2 room HDB flat"),
-    ("hdb_3_room", "3 room HDB flat"),
-    ("hdb_4_room", "4 room HDB flat"),
-    ("hdb_5_room", "5 room HDB flat"),
-    ("private_condo_apartment", "Private condo/ apartment"),
-    ("private_landed", "Private landed housing"),
-    ("other", "Other"),
-  )
-  TENURE_CHOICES = (
-    ("tenant", "Tenant"),
-    ("owner", "Owner"),
-  )
-
-  id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-  created_at = models.DateTimeField(auto_now_add=True)
-  gender = models.CharField(max_length=16, choices=GENDER_CHOICES)
-  ethnic_group = models.CharField(max_length=32, choices=ETHNIC_GROUP_CHOICES)
-  age_group = models.CharField(max_length=32, choices=AGE_GROUP_CHOICES)
-  housing_type = models.CharField(max_length=64, choices=HOUSING_TYPE_CHOICES)
-  housing_type_other = models.CharField(max_length=255, blank=True, default="")
-  tenure_status = models.CharField(max_length=16, choices=TENURE_CHOICES)
-
-  class Meta:
-    db_table = "pin_user_info"
-    ordering = ["-created_at"]
-
-  def clean(self) -> None:
-    if self.housing_type == "other" and not (self.housing_type_other or "").strip():
-      raise ValidationError({"housing_type_other": ["Please describe the housing type when selecting Other."]})
-    if self.housing_type != "other":
-      self.housing_type_other = ""
-
-  def __str__(self) -> str:
-    return f"{self.gender}/{self.ethnic_group}/{self.age_group}"
-
-
 class MyHubConceptPin(models.Model):
   CATEGORY_CHOICES = (
     ("tables", "Tables"),
@@ -390,6 +335,7 @@ class MyHubConceptPin(models.Model):
     ("event_spaces", "Event spaces"),
     ("exercise_areas", "Exercise areas"),
     ("makerspaces", "Makerspaces"),
+    ("open_idea", "Open idea"),
   )
 
   id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -414,13 +360,6 @@ class MyHubConceptPin(models.Model):
   )
   actor_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
   respondent_postcode = models.CharField(max_length=16, blank=True, default="", db_index=True)
-  pin_user_info = models.ForeignKey(
-    PinUserInfo,
-    on_delete=models.SET_NULL,
-    related_name="myhub_pins",
-    null=True,
-    blank=True,
-  )
   category_key = models.CharField(max_length=64, choices=CATEGORY_CHOICES, db_index=True)
   category_label = models.CharField(max_length=128)
   category_color = models.CharField(max_length=16)
